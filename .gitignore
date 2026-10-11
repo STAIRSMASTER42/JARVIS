@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.env
+.env.*
+*.pem
+.DS_Store
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+/dist/
+.idea/
+.vscode/

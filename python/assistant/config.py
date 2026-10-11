@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Mapping
+
+from assistant.errors import AssistantError
+
+SYSTEM_INSTRUCTION = (
+    "Analyze the screenshot and identify the main content the user is looking at. "
+    "If there is a question, provide the most likely answer and a concise explanation. "
+    "If it is a multiple-choice question, identify the selected answer by letter and text, "
+    "and briefly explain why. If it is reading material, summarize the important information. "
+    "If the user's intent is unclear, describe the visible content and offer useful assistance. "
+    "Never invent details that are not visible. Keep the initial response concise."
+)
+
+DEFAULTS: dict[str, Any] = {
+    "shortcut": {"modifiers": ["ctrl", "alt"], "key": "]"},
+    "model": "gpt-5.4-mini",
+    "max_output_tokens": 800,
+    "image_max_edge": 1600,
+    "jpeg_quality": 80,
+    "image_detail": "high",
+    "timeout_seconds": 45,
+    "system_instruction": SYSTEM_INSTRUCTION,
+    "user_prompt": "Analyze this screenshot.",
+    "popup": {"width": 400, "max_height": 520, "margin": 16},
+}
+
+_MODIFIERS = {"ctrl", "alt", "cmd", "shift"}
+_DETAILS = {"low", "high", "auto", "original"}
+
+
+def default_config_path() -> Path:
+    return Path.home() / ".config" / "mac-ai-assistant" / "config.json"
+
+
+def merge_dict(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = merge_dict(current, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _require_int(data: Mapping[str, Any], key: str, low: int, high: int) -> None:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        raise AssistantError(
+            "config_error",
+            f"Config field {key} must be an integer from {low} to {high}.",
+        )
+
+
+def validate_config(data: Mapping[str, Any]) -> None:
+    shortcut = data.get("shortcut")
+    if not isinstance(shortcut, dict):
+        raise AssistantError("config_error", "Config field shortcut must be an object.")
+    modifiers = shortcut.get("modifiers")
+    if (
+        not isinstance(modifiers, list)
+        or not modifiers
+        or any(not isinstance(item, str) or item not in _MODIFIERS for item in modifiers)
+    ):
+        raise AssistantError(
+            "config_error",
+            "Config shortcut.modifiers must be a list of ctrl, alt, cmd, and shift.",
+        )
+    key = shortcut.get("key")
+    if not isinstance(key, str) or not key.strip() or any(char.isspace() for char in key):
+        raise AssistantError(
+            "config_error",
+            "Config shortcut.key must be a Hammerspoon key name without spaces, such as ].",
+        )
+
+    model = data.get("model")
+    if not isinstance(model, str) or not model.strip() or any(char.isspace() for char in model):
+        raise AssistantError("config_error", "Config field model must be a model name.")
+
+    _require_int(data, "max_output_tokens", 16, 4000)
+    _require_int(data, "image_max_edge", 512, 2048)
+    _require_int(data, "jpeg_quality", 40, 95)
+    _require_int(data, "timeout_seconds", 5, 180)
+
+    detail = data.get("image_detail")
+    if detail not in _DETAILS:
+        raise AssistantError(
+            "config_error",
+            "Config field image_detail must be low, high, auto, or original.",
+        )
+
+    instruction = data.get("system_instruction")
+    prompt = data.get("user_prompt")
+    if not isinstance(instruction, str) or not instruction.strip():
+        raise AssistantError("config_error", "Config field system_instruction must be text.")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise AssistantError("config_error", "Config field user_prompt must be text.")
+
+    popup = data.get("popup")
+    if not isinstance(popup, dict):
+        raise AssistantError("config_error", "Config field popup must be an object.")
+    for field, low, high in (("width", 280, 800), ("max_height", 200, 1000), ("margin", 0, 80)):
+        value = popup.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            raise AssistantError(
+                "config_error",
+                f"Config field popup.{field} must be an integer from {low} to {high}.",
+            )
+
+
+def load_config(path: Path | None = None) -> dict[str, Any]:
+    """Load the user config, falling back to built-in defaults when it is absent."""
+    config_path = path or default_config_path()
+    override: dict[str, Any] = {}
+    if config_path.is_file():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise AssistantError(
+                "config_error",
+                f"The config file is not valid JSON: {config_path}",
+            ) from exc
+        if not isinstance(loaded, dict):
+            raise AssistantError("config_error", f"The config file must contain an object: {config_path}")
+        override = loaded
+    merged = merge_dict(DEFAULTS, override)
+    validate_config(merged)
+    return merged

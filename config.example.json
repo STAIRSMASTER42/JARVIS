@@ -1,0 +1,19 @@
+{
+  "shortcut": {
+    "modifiers": ["ctrl", "alt"],
+    "key": "]"
+  },
+  "model": "gpt-5.4-mini",
+  "max_output_tokens": 800,
+  "image_max_edge": 1600,
+  "jpeg_quality": 80,
+  "image_detail": "high",
+  "timeout_seconds": 45,
+  "system_instruction": "Analyze the screenshot and identify the main content the user is looking at. If there is a question, provide the most likely answer and a concise explanation. If it is a multiple-choice question, identify the selected answer by letter and text, and briefly explain why. If it is reading material, summarize the important information. If the user's intent is unclear, describe the visible content and offer useful assistance. Never invent details that are not visible. Keep the initial response concise.",
+  "user_prompt": "Analyze this screenshot.",
+  "popup": {
+    "width": 400,
+    "max_height": 520,
+    "margin": 16
+  }
+}

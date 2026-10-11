@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screen Assistant</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --card: rgba(255, 255, 255, 0.92);
+    --user: #e8f1ff;
+    --line: rgba(0, 0, 0, 0.08);
+    --accent: #0071e3;
+    --danger: #b42318;
+    --code: rgba(0, 0, 0, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --text: #f5f5f7;
+      --muted: #aeaeb2;
+      --card: rgba(44, 44, 46, 0.92);
+      --user: #1c3a5f;
+      --line: rgba(255, 255, 255, 0.1);
+      --accent: #0a84ff;
+      --danger: #ff6961;
+      --code: rgba(255, 255, 255, 0.08);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  header strong { font-size: 12px; font-weight: 600; }
+  header span { color: var(--muted); font-size: 11px; }
+  button, input {
+    font: inherit;
+    color: inherit;
+  }
+  button {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: default;
+  }
+  button:disabled { opacity: 0.4; }
+  #transcript {
+    flex: 1;
+    overflow: auto;
+    padding: 10px;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .bubble {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    white-space: normal;
+    word-wrap: break-word;
+  }
+  .assistant { background: var(--card); }
+  .user { background: var(--user); margin-left: 28px; }
+  .error { background: transparent; color: var(--danger); padding-left: 0; }
+  .bubble p { margin: 0 0 8px; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble ul { margin: 0 0 8px; padding-left: 18px; }
+  .bubble code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    background: var(--code);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+  .bubble pre {
+    margin: 0 0 8px;
+    padding: 8px;
+    overflow: auto;
+    background: var(--code);
+    border-radius: 8px;
+  }
+  .bubble pre code { background: transparent; padding: 0; }
+  #status {
+    min-height: 18px;
+    padding: 0 10px 6px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  form {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border-top: 1px solid var(--line);
+  }
+  input {
+    flex: 1;
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 8px;
+    padding: 7px 8px;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  input:focus { border-color: var(--accent); }
+  form button {
+    background: var(--accent);
+    color: white;
+    border-radius: 8px;
+    padding: 7px 10px;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <strong>Screen Assistant</strong>
+      <span id="hint">Drag the title bar to move</span>
+    </div>
+    <div>
+      <button id="copy" type="button">Copy</button>
+      <button id="close" type="button">Close</button>
+    </div>
+  </header>
+  <div id="transcript"></div>
+  <div id="status"></div>
+  <form id="followup">
+    <input id="question" type="text" placeholder="Ask a follow-up about this screen" autocomplete="off" spellcheck="true">
+    <button id="send" type="submit">Send</button>
+  </form>
+  <script>
+    const transcript = document.getElementById("transcript");
+    const status = document.getElementById("status");
+    const question = document.getElementById("question");
+    const send = document.getElementById("send");
+    const copy = document.getElementById("copy");
+
+    function post(payload) {
+      try {
+        window.webkit.messageHandlers.macAI.postMessage(payload);
+      } catch (err) {
+        status.textContent = "This window is not connected to the assistant.";
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function inlineSpans(text) {
+      return text
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    }
+
+    function formatPlain(text) {
+      const escaped = escapeHtml(text);
+      const chunks = escaped.split("```");
+      let html = "";
+      for (let index = 0; index < chunks.length; index += 1) {
+        if (index % 2 === 1) {
+          const code = chunks[index].replace(/^[^\n]*\n/, "");
+          html += "<pre><code>" + code + "</code></pre>";
+          continue;
+        }
+        const lines = chunks[index].split("\n");
+        let listOpen = false;
+        const closeList = () => {
+          if (listOpen) {
+            html += "</ul>";
+            listOpen = false;
+          }
+        };
+        lines.forEach((line) => {
+          const item = line.match(/^\s*[-*]\s+(.*)$/);
+          if (item) {
+            if (!listOpen) {
+              html += "<ul>";
+              listOpen = true;
+            }
+            html += "<li>" + inlineSpans(item[1]) + "</li>";
+            return;
+          }
+          closeList();
+          if (line.trim() !== "") {
+            html += "<p>" + inlineSpans(line) + "</p>";
+          }
+        });
+        closeList();
+      }
+      return html;
+    }
+
+    function addBubble(kind, text) {
+      const node = document.createElement("div");
+      node.className = "bubble " + kind;
+      node.dataset.plain = text;
+      if (kind === "error") {
+        node.textContent = text;
+      } else {
+        node.innerHTML = formatPlain(text);
+      }
+      transcript.appendChild(node);
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+
+    function setBusy(busy) {
+      question.disabled = busy;
+      send.disabled = busy;
+      if (busy) {
+        status.innerHTML = '<span class="spinner"></span><span>Asking OpenAI…</span>';
+      }
+    }
+
+    window.assistant = {
+      reset() {
+        transcript.innerHTML = "";
+        status.innerHTML = '<span class="spinner"></span><span>Reading the screen…</span>';
+        question.value = "";
+        setBusy(true);
+      },
+      setBusy(busy) {
+        setBusy(!!busy);
+        if (!busy && status.querySelector(".spinner")) {
+          status.textContent = "";
+        }
+      },
+      showAnswer(text) {
+        setBusy(false);
+        status.textContent = "";
+        addBubble("assistant", text || "");
+      },
+      showError(text) {
+        setBusy(false);
+        status.textContent = "";
+        addBubble("error", text || "The request failed.");
+      },
+      addUser(text) {
+        addBubble("user", text || "");
+        setBusy(true);
+      },
+      flash(text) {
+        status.textContent = text || "";
+      }
+    };
+
+    document.getElementById("followup").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = question.value.trim();
+      if (!text || question.disabled) return;
+      question.value = "";
+      post({ action: "followup", text: text });
+    });
+
+    copy.addEventListener("click", () => {
+      const parts = Array.from(transcript.querySelectorAll(".bubble"))
+        .map((node) => node.dataset.plain || "")
+        .filter(Boolean);
+      post({ action: "copy", text: parts.join("\n\n") });
+    });
+
+    document.getElementById("close").addEventListener("click", () => post({ action: "close" }));
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        post({ action: "close" });
+      }
+    });
+  </script>
+</body>
+</html>
