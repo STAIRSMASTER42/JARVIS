@@ -22,6 +22,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded["max_output_tokens"], 800)
         self.assertEqual(loaded["image_detail"], "high")
         self.assertEqual(loaded["popup"]["width"], 400)
+        self.assertTrue(loaded["classes_enabled"])
+        self.assertEqual(loaded["classes_dir"], "")
 
     def test_missing_file_uses_defaults(self) -> None:
         missing = Path(tempfile.gettempdir()) / "mac-ai-assistant-missing-config.json"
@@ -52,6 +54,14 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"
             path.write_text("{", encoding="utf-8")
+            with self.assertRaises(AssistantError) as caught:
+                load_config(path)
+        self.assertEqual(caught.exception.code, "config_error")
+
+    def test_home_directory_cannot_be_the_classes_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps({"classes_dir": str(Path.home())}), encoding="utf-8")
             with self.assertRaises(AssistantError) as caught:
                 load_config(path)
         self.assertEqual(caught.exception.code, "config_error")

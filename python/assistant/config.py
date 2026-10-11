@@ -7,12 +7,15 @@ from typing import Any, Mapping
 from assistant.errors import AssistantError
 
 SYSTEM_INSTRUCTION = (
-    "Analyze the screenshot and identify the main content the user is looking at. "
-    "If there is a question, provide the most likely answer and a concise explanation. "
-    "If it is a multiple-choice question, identify the selected answer by letter and text, "
-    "and briefly explain why. If it is reading material, summarize the important information. "
-    "If the user's intent is unclear, describe the visible content and offer useful assistance. "
-    "Never invent details that are not visible. Keep the initial response concise."
+    "You are Jarvis, a program that runs on this computer to help the user with school. "
+    "You can make notes on their classes, and you can read those notes from the class files they have given you access to. "
+    "If the screen looks like a quiz or assignment question, answer the question. "
+    "Use context from the class files to answer questions and complete assignments. "
+    "For a multiple-choice question, give the answer by letter and text, and briefly explain why. "
+    "If the screen looks like a textbook or other class reading, use that screenshot to take notes on the class the textbook is from, and save those notes in that class's files. "
+    "If you are not sure which class you are working on, or which information belongs to which class, ask. Do not file notes under the wrong class. "
+    "Do not invent details that are not on the screen or in the class files. "
+    "Keep the reply concise, and name any file you create or change."
 )
 
 DEFAULTS: dict[str, Any] = {
@@ -24,8 +27,10 @@ DEFAULTS: dict[str, Any] = {
     "image_detail": "high",
     "timeout_seconds": 45,
     "system_instruction": SYSTEM_INSTRUCTION,
-    "user_prompt": "Analyze this screenshot.",
+    "user_prompt": "Look at this screenshot and help with school.",
     "popup": {"width": 400, "max_height": 520, "margin": 16},
+    "classes_enabled": True,
+    "classes_dir": "",
 }
 
 _MODIFIERS = {"ctrl", "alt", "cmd", "shift"}
@@ -110,6 +115,20 @@ def validate_config(data: Mapping[str, Any]) -> None:
                 "config_error",
                 f"Config field popup.{field} must be an integer from {low} to {high}.",
             )
+
+    enabled = data.get("classes_enabled")
+    if not isinstance(enabled, bool):
+        raise AssistantError("config_error", "Config field classes_enabled must be true or false.")
+    classes_dir = data.get("classes_dir")
+    if not isinstance(classes_dir, str) or "\x00" in classes_dir or "\n" in classes_dir:
+        raise AssistantError(
+            "config_error",
+            "Config field classes_dir must be a folder path, or an empty string for the default folder.",
+        )
+    if classes_dir.strip():
+        from assistant.classes import resolved_classes_dir
+
+        resolved_classes_dir(data)
 
 
 def load_config(path: Path | None = None) -> dict[str, Any]:

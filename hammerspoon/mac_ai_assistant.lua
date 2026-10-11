@@ -140,40 +140,56 @@ local function deleteFile(path)
   end
 end
 
+local function stopWatchdog()
+  if state.watchdog then
+    state.watchdog:stop()
+    state.watchdog = nil
+  end
+end
+
 local function cancelWork()
   state.session = (state.session or 0) + 1
   state.busy = false
   state.responseId = nil
+  stopWatchdog()
   if state.captureTimer then
     state.captureTimer:stop()
     state.captureTimer = nil
   end
   local imagePath = state.imagePath
   state.imagePath = nil
+  state.pendingImage = nil
   local task = state.task
   state.task = nil
+  _G.macAIAssistantTask = nil
   if task then
     pcall(function() task:terminate() end)
   end
   deleteFile(imagePath)
 end
 
+local function scriptFor(fn, value)
+  if value == nil then
+    return "window.assistant && window.assistant." .. fn .. "()"
+  end
+  if type(value) == "boolean" then
+    return "window.assistant && window.assistant." .. fn .. "(" .. (value and "true" or "false") .. ")"
+  end
+  local encoded = hs.base64.encode(tostring(value))
+  if not encoded then
+    return nil
+  end
+  encoded = encoded:gsub("%s", "")
+  return "window.assistant && window.assistant." .. fn .. "(window.assistant.decodeB64('" .. encoded .. "'))"
+end
+
 local function flushJS()
   local pending = state.pendingJS or {}
   state.pendingJS = {}
   for _, item in ipairs(pending) do
-    local fn, value = item[1], item[2]
-    local script
-    if value == nil then
-      script = "window.assistant && window.assistant." .. fn .. "()"
-    else
-      local encoded = hs.json.encode(value)
-      if encoded then
-        script = "window.assistant && window.assistant." .. fn .. "(" .. encoded .. ")"
-      end
-    end
-    if script and state.webview then
-      local view = state.webview
+    local script = scriptFor(item[1], item[2])
+    local view = state.webview
+    if script and view then
       pcall(function()
         view:evaluateJavaScript(script)
       end)
@@ -236,6 +252,8 @@ local function onWebMessage(message)
     callJS("flash", "Copied.")
   elseif body.action == "followup" then
     M.followup(tostring(body.text or ""))
+  elseif body.action == "again" then
+    M.captureAgain()
   end
 end
 
@@ -263,7 +281,7 @@ local function ensurePopup(screen)
 
   local view = hs.webview.new(popupRect(screen), { developerExtrasEnabled = false }, userContent)
   view:windowStyle({ "titled", "closable", "utility", "nonactivating" })
-  view:windowTitle("Screen Assistant")
+  view:windowTitle("Jarvis")
   view:titleVisibility("visible")
   view:level(hs.drawing.windowLevels.floating)
   pcall(function()
@@ -354,6 +372,43 @@ local function decodeResult(stdout)
   return nil
 end
 
+local function applyResult(session, stdOut, stdErr)
+  deleteFile(state.pendingImage)
+  state.pendingImage = nil
+  stopWatchdog()
+  state.task = nil
+  _G.macAIAssistantTask = nil
+  state.busy = false
+
+  if session ~= state.session or not state.webview then
+    return
+  end
+
+  local payload = decodeResult(stdOut)
+  if not payload then
+    local detail = redact(stdErr)
+    if detail == "" then
+      detail = redact(stdOut)
+    end
+    if #detail > 240 then
+      detail = detail:sub(1, 240)
+    end
+    if detail == "" then
+      detail = "The assistant closed without a result."
+    end
+    callJS("showError", "The assistant returned an unexpected response. " .. detail)
+    return
+  end
+  if payload.ok then
+    state.responseId = payload.response_id or ""
+    callJS("showAnswer", tostring(payload.text or ""))
+    log.i("request finished")
+  else
+    log.i("request failed: " .. tostring(payload.code))
+    callJS("showError", redact(payload.error or "The request failed."))
+  end
+end
+
 local function runPython(session, args, imagePath)
   if not state.root then
     deleteFile(imagePath)
@@ -371,35 +426,16 @@ local function runPython(session, args, imagePath)
     command[#command + 1] = tostring(arg)
   end
 
+  state.pendingImage = imagePath
   local task = hs.task.new("/bin/bash", function(_, stdOut, stdErr)
-    deleteFile(imagePath)
-    if state.imagePath == imagePath then
-      state.imagePath = nil
-    end
-    if session ~= state.session then
-      return false
-    end
-    state.task = nil
-    state.busy = false
-    local payload = decodeResult(stdOut)
-    if not payload then
-      local detail = redact(stdErr)
-      if detail == "" then
-        detail = redact(stdOut)
-      end
-      if #detail > 240 then
-        detail = detail:sub(1, 240)
-      end
-      presentError(state.screen, "The assistant returned an unexpected response. " .. detail)
-      return false
-    end
-    if payload.ok then
-      state.responseId = payload.response_id or ""
-      callJS("showAnswer", tostring(payload.text or ""))
-      log.i("request finished")
-    else
-      log.i("request failed: " .. tostring(payload.code))
-      callJS("showError", redact(payload.error or "The request failed."))
+    local ok, err = pcall(applyResult, session, stdOut, stdErr)
+    if not ok then
+      state.busy = false
+      state.task = nil
+      _G.macAIAssistantTask = nil
+      stopWatchdog()
+      log.e("result failed: " .. redact(err))
+      callJS("showError", "The answer could not be shown. Try the shortcut again.")
     end
     return false
   end, command)
@@ -411,11 +447,30 @@ local function runPython(session, args, imagePath)
   end
   task:setWorkingDirectory(state.root)
   state.task = task
+  _G.macAIAssistantTask = task
   if not task:start() then
     state.task = nil
+    _G.macAIAssistantTask = nil
     deleteFile(imagePath)
     presentError(state.screen, "Could not start the OpenAI request.")
+    return
   end
+
+  stopWatchdog()
+  state.watchdog = hs.timer.doAfter(180, function()
+    state.watchdog = nil
+    if session ~= state.session or not state.busy then
+      return
+    end
+    if state.task then
+      pcall(function() state.task:terminate() end)
+    end
+    state.busy = false
+    state.task = nil
+    _G.macAIAssistantTask = nil
+    deleteFile(imagePath)
+    callJS("showError", "The request took too long and was stopped. Check the internet connection and try again.")
+  end)
 end
 
 local function temporaryPNG()
@@ -443,6 +498,65 @@ local function captureScreen(screen)
     return nil, "Could not save the screenshot. Enable Screen Recording for Hammerspoon, then quit and reopen Hammerspoon."
   end
   return path
+end
+
+function M.captureAgain()
+  if state.busy then
+    callJS("flash", "A request is already running.")
+    return
+  end
+  if not state.responseId or state.responseId == "" then
+    callJS("showError", "Wait for an answer before adding another screenshot.")
+    return
+  end
+
+  state.busy = true
+  state.session = state.session + 1
+  local session = state.session
+  local previousId = state.responseId
+  state.screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+  callJS("setBusy", true)
+
+  local function capture()
+    if session ~= state.session then
+      return
+    end
+    local path, err = captureScreen(state.screen)
+    if not path then
+      presentError(state.screen, err)
+      return
+    end
+    state.imagePath = path
+    local shown, showErr = pcall(function()
+      ensurePopup(state.screen)
+      callJS("addUser", "Another screenshot")
+      runPython(session, {
+        "analyze",
+        "--image",
+        path,
+        "--previous-id",
+        previousId,
+        "--config",
+        CONFIG_PATH,
+      }, path)
+    end)
+    if not shown then
+      state.busy = false
+      deleteFile(path)
+      log.e("popup failed: " .. redact(showErr))
+      hs.notify.show("Screen Assistant", "", "The popup could not open. " .. redact(showErr))
+    end
+  end
+
+  if state.webview and state.webview:isVisible() then
+    state.webview:hide()
+    state.captureTimer = hs.timer.doAfter(0.15, function()
+      state.captureTimer = nil
+      capture()
+    end)
+  else
+    capture()
+  end
 end
 
 function M.followup(text)
@@ -500,14 +614,22 @@ function M.trigger(force)
       return
     end
     state.imagePath = path
-    presentLoading(state.screen)
-    runPython(session, {
-      "analyze",
-      "--image",
-      path,
-      "--config",
-      CONFIG_PATH,
-    }, path)
+    local shown, showErr = pcall(function()
+      presentLoading(state.screen)
+      runPython(session, {
+        "analyze",
+        "--image",
+        path,
+        "--config",
+        CONFIG_PATH,
+      }, path)
+    end)
+    if not shown then
+      state.busy = false
+      deleteFile(path)
+      log.e("popup failed: " .. redact(showErr))
+      hs.notify.show("Screen Assistant", "", "The popup could not open. " .. redact(showErr))
+    end
   end
 
   if state.webview and state.webview:isVisible() then

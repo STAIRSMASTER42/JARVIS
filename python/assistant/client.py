@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 from typing import Any
 
 from assistant.errors import EMPTY_RESPONSE_MESSAGE, AssistantError, map_exception
@@ -19,8 +20,9 @@ def build_analyze_request(
     data_url: str,
     detail: str,
     max_output_tokens: int,
+    tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "model": model,
         "instructions": instructions,
         "max_output_tokens": max_output_tokens,
@@ -38,6 +40,9 @@ def build_analyze_request(
             }
         ],
     }
+    if tools:
+        payload["tools"] = tools
+    return payload
 
 
 def build_followup_request(
@@ -47,14 +52,62 @@ def build_followup_request(
     previous_response_id: str,
     text: str,
     max_output_tokens: int,
+    tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "model": model,
         "instructions": instructions,
         "previous_response_id": previous_response_id,
         "max_output_tokens": max_output_tokens,
         "input": text,
     }
+    if tools:
+        payload["tools"] = tools
+    return payload
+
+
+CONTINUE_IMAGE_PROMPT = (
+    "Another screenshot of the same schoolwork. "
+    "Use the earlier screenshots, this conversation, and the class files as context. "
+    "If this is a quiz or assignment question, answer it. "
+    "If this is textbook reading, take notes for the class it belongs to. "
+    "If you are unsure which class, ask."
+)
+
+
+def build_continue_image_request(
+    *,
+    model: str,
+    instructions: str,
+    previous_response_id: str,
+    prompt: str,
+    data_url: str,
+    detail: str,
+    max_output_tokens: int,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": model,
+        "instructions": instructions,
+        "previous_response_id": previous_response_id,
+        "max_output_tokens": max_output_tokens,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {
+                        "type": "input_image",
+                        "image_url": data_url,
+                        "detail": detail,
+                    },
+                ],
+            }
+        ],
+    }
+    if tools:
+        payload["tools"] = tools
+    return payload
 
 
 def build_connection_request(*, model: str, max_output_tokens: int = 16) -> dict[str, Any]:
@@ -125,3 +178,82 @@ def complete(client: Any, payload: dict[str, Any]) -> tuple[str, str]:
     if not text:
         raise AssistantError("bad_response", EMPTY_RESPONSE_MESSAGE)
     return text, response_id(response)
+
+
+def _field(item: Any, key: str) -> Any:
+    if isinstance(item, dict):
+        return item.get(key)
+    return getattr(item, key, None)
+
+
+def function_calls(response: Any) -> list[dict[str, str]]:
+    """Return function tool calls from a Responses API result."""
+    output = _field(response, "output")
+    calls: list[dict[str, str]] = []
+    for item in output or []:
+        if _field(item, "type") != "function_call":
+            continue
+        call_id = _field(item, "call_id")
+        name = _field(item, "name")
+        arguments = _field(item, "arguments")
+        if not isinstance(call_id, str) or not call_id:
+            continue
+        if not isinstance(name, str) or not name:
+            continue
+        calls.append(
+            {
+                "call_id": call_id,
+                "name": name,
+                "arguments": arguments if isinstance(arguments, str) else "",
+            }
+        )
+    return calls
+
+
+def complete_with_tools(
+    client: Any,
+    payload: dict[str, Any],
+    execute: Callable[[str, str], str],
+    *,
+    max_rounds: int = 5,
+) -> tuple[str, str]:
+    """Call the model, run class-file tools, and repeat until it returns text."""
+    response = create_response(client, payload)
+    for round_index in range(max_rounds + 1):
+        calls = function_calls(response)
+        if not calls:
+            text = extract_text(response)
+            if not text:
+                raise AssistantError("bad_response", EMPTY_RESPONSE_MESSAGE)
+            return text, response_id(response)
+        if round_index == max_rounds:
+            break
+        outputs = []
+        for call in calls:
+            result = execute(call["name"], call["arguments"])
+            if not isinstance(result, str):
+                result = str(result)
+            outputs.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call["call_id"],
+                    "output": result[:12000],
+                }
+            )
+        identifier = response_id(response)
+        if not identifier:
+            raise AssistantError("bad_response", EMPTY_RESPONSE_MESSAGE)
+        response = create_response(
+            client,
+            {
+                "model": payload["model"],
+                "previous_response_id": identifier,
+                "input": outputs,
+                "tools": payload.get("tools") or [],
+                "max_output_tokens": payload["max_output_tokens"],
+            },
+        )
+    raise AssistantError(
+        "bad_response",
+        "The assistant used class files too many times without finishing. Try the question again.",
+    )

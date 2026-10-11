@@ -6,8 +6,10 @@ from types import SimpleNamespace
 from assistant.client import (
     build_analyze_request,
     build_connection_request,
+    build_continue_image_request,
     build_followup_request,
     complete,
+    complete_with_tools,
     extract_text,
     image_data_url,
     response_id,
@@ -41,6 +43,24 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(content[1]["detail"], "high")
         self.assertTrue(content[1]["image_url"].startswith("data:image/jpeg;base64,"))
         self.assertNotIn("file_id", content[1])
+
+    def test_continue_image_keeps_previous_response(self) -> None:
+        payload = build_continue_image_request(
+            model="gpt-5.4-mini",
+            instructions="Be concise.",
+            previous_response_id="resp_123",
+            prompt="Another screenshot of the same work.",
+            data_url="data:image/jpeg;base64,aaaa",
+            detail="high",
+            max_output_tokens=800,
+            tools=[{"type": "function", "name": "read_class_file"}],
+        )
+        self.assertEqual(payload["previous_response_id"], "resp_123")
+        content = payload["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_text")
+        self.assertEqual(content[1]["type"], "input_image")
+        self.assertEqual(content[1]["detail"], "high")
+        self.assertEqual(payload["tools"][0]["name"], "read_class_file")
 
     def test_followup_keeps_previous_response(self) -> None:
         payload = build_followup_request(
@@ -102,6 +122,74 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(AssistantError) as caught:
             complete(_Client(), {"model": "gpt-5.4-mini", "input": "hi"})
         self.assertEqual(caught.exception.code, "invalid_api_key")
+
+    def test_tool_round_trip(self) -> None:
+        calls: list[tuple[str, str]] = []
+
+        class _Responses:
+            def __init__(self) -> None:
+                self.payloads: list[dict[str, object]] = []
+
+            def create(self, **kwargs: object) -> object:
+                self.payloads.append(kwargs)
+                if len(self.payloads) == 1:
+                    return SimpleNamespace(
+                        id="resp_1",
+                        output_text="",
+                        output=[
+                            SimpleNamespace(
+                                type="function_call",
+                                name="read_class_file",
+                                call_id="call_1",
+                                arguments='{"path": "bio/notes.md"}',
+                            )
+                        ],
+                    )
+                return {"output_text": "Answer B", "id": "resp_2", "output": []}
+
+        client = SimpleNamespace(responses=_Responses())
+
+        def execute(name: str, arguments: str) -> str:
+            calls.append((name, arguments))
+            return "Chapter 3 is diffusion."
+
+        text, identifier = complete_with_tools(
+            client,
+            {"model": "gpt-5.4-mini", "max_output_tokens": 800, "tools": [{"type": "function", "name": "read_class_file"}]},
+            execute,
+        )
+        self.assertEqual(text, "Answer B")
+        self.assertEqual(identifier, "resp_2")
+        self.assertEqual(calls, [("read_class_file", '{"path": "bio/notes.md"}')])
+        follow = client.responses.payloads[1]
+        self.assertEqual(follow["previous_response_id"], "resp_1")
+        self.assertEqual(follow["input"][0]["type"], "function_call_output")
+        self.assertEqual(follow["input"][0]["output"], "Chapter 3 is diffusion.")
+
+    def test_too_many_tool_rounds(self) -> None:
+        class _Responses:
+            def create(self, **kwargs: object) -> object:
+                return SimpleNamespace(
+                    id="resp_loop",
+                    output_text="",
+                    output=[
+                        SimpleNamespace(
+                            type="function_call",
+                            name="list_class_files",
+                            call_id="call_1",
+                            arguments="{}",
+                        )
+                    ],
+                )
+
+        with self.assertRaises(AssistantError) as caught:
+            complete_with_tools(
+                SimpleNamespace(responses=_Responses()),
+                {"model": "gpt-5.4-mini", "max_output_tokens": 100, "tools": []},
+                lambda name, arguments: "ok",
+                max_rounds=1,
+            )
+        self.assertEqual(caught.exception.code, "bad_response")
 
 
 if __name__ == "__main__":

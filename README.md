@@ -52,7 +52,7 @@ Each Mac has its own key. The installer stores it with:
 scripts/setup-key.sh
 ```
 
-That writes a Keychain item named `mac-ai-assistant` / `openai`. You can instead export `OPENAI_API_KEY` in the environment Hammerspoon can see. The environment variable is checked first. Do not put the key in `config.json` or in git.
+That writes a Keychain item with service `mac-ai-assistant-openai` and account `charliebaker`. The assistant reads it with `security find-generic-password`. You can instead export `OPENAI_API_KEY` in the environment Hammerspoon can see. The environment variable is checked first. Do not put the key in `config.json` or in git.
 
 The first request may show a Keychain prompt for `python`. Choose **Always Allow**.
 
@@ -80,7 +80,7 @@ The popup shows a spinner, then the answer. Text in the answer can be selected. 
 
 Pressing the shortcut again while a request is running does not start a second request.
 
-Type a follow-up in the box at the bottom and press Return. That conversation lasts until you close the panel or capture a new screen.
+Type a follow-up in the box at the bottom and press Return. **Another screenshot** captures the display again and keeps this conversation, so the next page or question stays in the same context. Pressing the shortcut starts a fresh answer. Closing the panel ends it too.
 
 ### Quit or disable
 
@@ -105,12 +105,37 @@ Edit `~/.config/mac-ai-assistant/config.json`, then choose **Reload Config** fro
 | `image_detail` | `low`, `high`, `auto`, or `original`. Default `high`, so small text stays readable. |
 | `timeout_seconds` | Request timeout. Default `45`. |
 | `popup.width`, `popup.max_height`, `popup.margin` | Size and inset of the panel. |
+| `classes_enabled` | When true, the assistant can read and edit your class files. Default `true`. |
+| `classes_dir` | Folder for class files. Empty uses `~/Documents/mac-ai-assistant/classes`. |
 
-The initial instruction asks the model to answer a visible question, name a multiple-choice answer by letter and text, or summarize reading material, and not to invent details that are not on screen.
+## Class files
+
+Class notes stay on this Mac, outside the git repository. The default folder is:
+
+```text
+~/Documents/mac-ai-assistant/classes
+```
+
+Each class is its own folder with `course.md`, `notes.md`, and `assignments.md`. Add one from the project directory:
+
+```bash
+scripts/run.sh classes add --title "Biology 101" --term "Fall 2026"
+scripts/run.sh classes list
+```
+
+You can also ask in the popup, for example: "Add my Biology 101 class" or "Save this as a note for Biology."
+
+On a quiz or assignment, Jarvis answers the question and uses the matching class files as context. On a textbook screenshot, it saves notes into that class. If it cannot tell which class the screen belongs to, it asks. After it changes a file, the reply names the file.
+
+Those file contents are sent to OpenAI only as part of a request you start, the same as the screenshot. Set `classes_enabled` to `false` to turn this off.
+
+The classes folder must be a dedicated directory. Your home folder, Desktop, Documents, or Downloads cannot be used as `classes_dir`.
+
+The instruction tells the model it is Jarvis, a school assistant on this Mac. It answers quiz and assignment screens, takes notes from textbook screens into the matching class, reads the class files it has access to, and asks when it is not sure which class something belongs to.
 
 ## Check the API
 
-This sends a short text request (no screenshot) and prints JSON. It uses a small amount of API credit:
+This reads the key from Keychain and sends a short text request (no screenshot) to `gpt-5.4-nano`. It uses a small amount of API credit:
 
 ```bash
 scripts/test-connection.sh
@@ -132,6 +157,7 @@ scripts/test.sh
 - The image is sent to OpenAI as part of the Responses API call. It is not sent to any other service.
 - Follow-up questions use OpenAI’s stored response id so the image does not have to be uploaded again. Your OpenAI account’s data-retention settings still apply.
 - The API key is not written to the popup, the Hammerspoon log, or this git repository.
+- Class files stay in the classes folder. The assistant cannot write outside that folder. When it reads a file to answer you, that text is included in the OpenAI request.
 
 ## What still has to be checked by hand
 

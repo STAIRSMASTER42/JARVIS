@@ -9,4 +9,5 @@ if [[ -f "${CONFIG}" ]]; then
   ARGS+=(--config "${CONFIG}")
 fi
 
+ARGS+=(--model "${CONNECTION_MODEL:-gpt-5.4-nano}")
 "${ROOT}/scripts/run.sh" "${ARGS[@]}"

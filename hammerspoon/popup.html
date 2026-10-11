@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Screen Assistant</title>
+<title>Jarvis</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -119,11 +119,23 @@
     flex: none;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  #composer {
+    border-top: 1px solid var(--line);
+    padding: 8px;
+  }
+  #again {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 7px 10px;
+  }
   form {
     display: flex;
     gap: 6px;
-    padding: 8px;
-    border-top: 1px solid var(--line);
   }
   input {
     flex: 1;
@@ -147,8 +159,8 @@
 <body>
   <header>
     <div>
-      <strong>Screen Assistant</strong>
-      <span id="hint">Drag the title bar to move</span>
+      <strong>Jarvis</strong>
+      <span id="hint">School help on this Mac</span>
     </div>
     <div>
       <button id="copy" type="button">Copy</button>
@@ -157,16 +169,20 @@
   </header>
   <div id="transcript"></div>
   <div id="status"></div>
-  <form id="followup">
-    <input id="question" type="text" placeholder="Ask a follow-up about this screen" autocomplete="off" spellcheck="true">
-    <button id="send" type="submit">Send</button>
-  </form>
+  <div id="composer">
+    <button id="again" type="button">Another screenshot</button>
+    <form id="followup">
+      <input id="question" type="text" placeholder="Ask a follow-up about this screen" autocomplete="off" spellcheck="true">
+      <button id="send" type="submit">Send</button>
+    </form>
+  </div>
   <script>
     const transcript = document.getElementById("transcript");
     const status = document.getElementById("status");
     const question = document.getElementById("question");
     const send = document.getElementById("send");
     const copy = document.getElementById("copy");
+    const again = document.getElementById("again");
 
     function post(payload) {
       try {
@@ -244,12 +260,19 @@
     function setBusy(busy) {
       question.disabled = busy;
       send.disabled = busy;
+      again.disabled = busy;
       if (busy) {
         status.innerHTML = '<span class="spinner"></span><span>Asking OpenAI…</span>';
       }
     }
 
+    function decodeB64(value) {
+      const bytes = Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+
     window.assistant = {
+      decodeB64,
       reset() {
         transcript.innerHTML = "";
         status.innerHTML = '<span class="spinner"></span><span>Reading the screen…</span>';
@@ -263,9 +286,15 @@
         }
       },
       showAnswer(text) {
-        setBusy(false);
-        status.textContent = "";
-        addBubble("assistant", text || "");
+        try {
+          setBusy(false);
+          status.textContent = "";
+          addBubble("assistant", text || "");
+        } catch (err) {
+          setBusy(false);
+          status.textContent = "";
+          addBubble("error", "The answer came back, but it could not be displayed.");
+        }
       },
       showError(text) {
         setBusy(false);
@@ -287,6 +316,11 @@
       if (!text || question.disabled) return;
       question.value = "";
       post({ action: "followup", text: text });
+    });
+
+    again.addEventListener("click", () => {
+      if (again.disabled) return;
+      post({ action: "again" });
     });
 
     copy.addEventListener("click", () => {

@@ -6,8 +6,8 @@ from typing import Callable, Mapping, Sequence
 
 from assistant.errors import MISSING_KEY_MESSAGE, AssistantError
 
-SERVICE_NAME = "mac-ai-assistant"
-ACCOUNT_NAME = "openai"
+SERVICE_NAME = "mac-ai-assistant-openai"
+ACCOUNT_NAME = "charliebaker"
 
 
 def keychain_command() -> list[str]:

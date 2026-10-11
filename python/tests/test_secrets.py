@@ -30,8 +30,8 @@ class SecretTests(unittest.TestCase):
         command = keychain_command()
         self.assertEqual(command[0], "/usr/bin/security")
         self.assertIn("find-generic-password", command)
-        self.assertIn("mac-ai-assistant", command)
-        self.assertIn("openai", command)
+        self.assertIn("mac-ai-assistant-openai", command)
+        self.assertIn("charliebaker", command)
         self.assertNotIn("-w", command[:-1])
         self.assertEqual(command[-1], "-w")
 

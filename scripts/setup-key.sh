@@ -27,11 +27,11 @@ fi
 TRUST+=(-T /usr/bin/security)
 
 security add-generic-password -U \
-  -s mac-ai-assistant \
-  -a openai \
+  -s mac-ai-assistant-openai \
+  -a charliebaker \
   -w "${KEY}" \
   "${TRUST[@]}" >/dev/null
 
 unset KEY
-echo "Stored the API key in Keychain (service mac-ai-assistant, account openai)."
+echo "Stored the API key in Keychain (service mac-ai-assistant-openai, account charliebaker)."
 echo "If macOS asks for Keychain access the first time you use the shortcut, choose Always Allow."
