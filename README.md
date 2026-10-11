@@ -125,7 +125,9 @@ scripts/run.sh classes list
 
 You can also ask in the popup, for example: "Add my Biology 101 class" or "Save this as a note for Biology."
 
-On a quiz or assignment, Jarvis answers the question and uses the matching class files as context. On a textbook screenshot, it saves notes into that class. If it cannot tell which class the screen belongs to, it asks. After it changes a file, the reply names the file.
+On a quiz or assignment, Jarvis answers the question and uses the matching class files, assignment notes, and source documents as context. On a textbook screenshot, it saves notes into that class or assignment. If it cannot tell which class the screen belongs to, it asks. After it changes a file, the reply names the file.
+
+**Classes** in the popup opens a page in your browser. Pick a class, then an assignment, to read the notes Jarvis saved. Use **Add file** on an assignment to attach any source. Jarvis can read text, PDF, and Word files, and it can see the names of other files you add.
 
 Those file contents are sent to OpenAI only as part of a request you start, the same as the screenshot. Set `classes_enabled` to `false` to turn this off.
 

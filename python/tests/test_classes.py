@@ -7,11 +7,13 @@ from pathlib import Path
 
 from assistant.classes import (
     ClassWorkspace,
+    add_assignment,
     add_course,
     append_change_note,
     catalog,
     resolve_class_file,
     resolved_classes_dir,
+    save_source,
     slugify,
     with_class_context,
 )
@@ -77,7 +79,7 @@ class ClassFileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             root.mkdir(exist_ok=True)
-            for relative in ("../secrets.md", "/etc/passwd", "notes.py", "bio/../../outside.md"):
+            for relative in ("../secrets.md", "/etc/passwd", "bio/../../outside.md"):
                 with self.assertRaises(AssistantError):
                     resolve_class_file(root, relative)
 
@@ -108,6 +110,50 @@ class ClassFileTests(unittest.TestCase):
         with self.assertRaises(AssistantError) as caught:
             resolved_classes_dir({"classes_dir": str(Path.home() / "Documents")})
         self.assertEqual(caught.exception.code, "config_error")
+
+    def test_assignment_notes_and_sources_stay_in_the_class(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            add_course(root, "Biology 101")
+            folder = add_assignment(root, "biology-101", "Lab report", due="Friday")
+            self.assertTrue((folder / "notes.md").is_file())
+            self.assertTrue((folder / "sources").is_dir())
+            saved = save_source(root, "biology-101", "lab-report", "../reading.pdf", b"%PDF-1.4 demo")
+            self.assertEqual(saved.name, "reading.pdf")
+            self.assertEqual(saved.parent.name, "sources")
+            listed = catalog(root)
+            self.assertIn("lab-report", listed)
+            self.assertIn("reading.pdf", listed)
+            workspace = ClassWorkspace(root)
+            refused = workspace.dispatch(
+                "write_class_file",
+                {"path": "biology-101/assignments/lab-report/sources/reading.pdf", "content": "nope"},
+            )
+            self.assertIn("Classes window", refused)
+            self.assertEqual(saved.read_bytes(), b"%PDF-1.4 demo")
+            created = workspace.dispatch(
+                "create_assignment",
+                {"class_folder": "biology-101", "title": "Essay", "due": ""},
+            )
+            self.assertIn("biology-101/assignments/essay", created)
+
+    def test_source_path_can_be_read(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = resolve_class_file(root, "biology-101/assignments/essay/sources/reading.pdf")
+            self.assertTrue(str(path).endswith("biology-101/assignments/essay/sources/reading.pdf"))
+
+    def test_any_file_can_be_attached_inside_the_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            add_course(root, "History")
+            add_assignment(root, "history", "Paper")
+            saved = save_source(root, "history", "paper", "../../slides.png", b"png")
+            self.assertEqual(saved.name, "slides.png")
+            self.assertEqual(saved.parent.name, "sources")
+            self.assertFalse((root.parent / "slides.png").exists())
+            with self.assertRaises(AssistantError):
+                save_source(root, "history", "paper", "", b"data")
 
     def test_duplicate_class_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

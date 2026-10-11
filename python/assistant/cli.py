@@ -15,6 +15,7 @@ from assistant.classes import (
     resolved_classes_dir,
     with_class_context,
 )
+from assistant.library import serve_library
 from assistant.config import load_config
 from assistant.errors import AssistantError, sanitize
 from assistant.images import prepare_image
@@ -199,6 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     classes_sub = classes_parser.add_subparsers(dest="classes_command", required=True)
     classes_sub.add_parser("path", help="Print the classes folder")
     classes_sub.add_parser("list", help="List class folders")
+    classes_sub.add_parser("serve", help="Open the classes page on this Mac")
     add_parser = classes_sub.add_parser("add", help="Create a class folder")
     add_parser.add_argument("--title", required=True)
     add_parser.add_argument("--term", default="")
@@ -216,6 +218,9 @@ def run_classes(args: argparse.Namespace) -> int:
     if args.classes_command == "list":
         workspace = ClassWorkspace(root)
         print(catalog(workspace.root))
+        return 0
+    if args.classes_command == "serve":
+        serve_library(root)
         return 0
     if args.classes_command == "add":
         folder = add_course(

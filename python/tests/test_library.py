@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from assistant.classes import add_assignment, add_course
+from assistant.library import start_library
+
+
+def _request(url: str, data: bytes | None = None, content_type: str | None = None) -> tuple[int, str]:
+    request = urllib.request.Request(url, data=data)
+    if content_type:
+        request.add_header("Content-Type", content_type)
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            return response.status, response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", errors="replace")
+
+
+class LibraryPageTests(unittest.TestCase):
+    def test_pages_list_classes_assignments_and_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            add_course(root, "Biology 101")
+            notes = root / "biology-101" / "assignments"
+            folder = add_assignment(root, "biology-101", "Lab report", due="Friday")
+            (folder / "notes.md").write_text("# Notes — Lab report\n\nDiffusion across a membrane.\n", encoding="utf-8")
+            server = start_library(root)
+            self.addCleanup(server.shutdown)
+            self.addCleanup(server.server_close)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            status, home = _request(base + "/")
+            self.assertEqual(status, 200)
+            self.assertIn("Biology 101", home)
+            self.assertIn("1 assignment", home)
+            self.assertIn('setData("text/plain"', home)
+
+            status, course = _request(base + "/class/biology-101")
+            self.assertEqual(status, 200)
+            self.assertIn("Lab report", course)
+            self.assertIn("Due Friday", course)
+
+            status, assignment = _request(base + "/class/biology-101/assignments/lab-report")
+            self.assertEqual(status, 200)
+            self.assertIn("Diffusion across a membrane.", assignment)
+            self.assertIn("Add file", assignment)
+            self.assertIn('setData("text/plain"', assignment)
+            self.assertNotIn("accept=", assignment)
+            self.assertNotIn(str(notes), assignment)
+
+            boundary = "----jarvis"
+            payload = (
+                f"--{boundary}\r\n"
+                'Content-Disposition: form-data; name="source"; filename="reading.pdf"\r\n'
+                "Content-Type: application/pdf\r\n\r\n"
+            ).encode() + b"%PDF-1.4 demo\n" + f"\r\n--{boundary}--\r\n".encode()
+            upload = urllib.request.Request(
+                base + "/class/biology-101/assignments/lab-report/sources",
+                data=payload,
+                method="POST",
+            )
+            upload.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+            with urllib.request.urlopen(upload, timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                uploaded = response.read().decode("utf-8")
+            self.assertIn("reading.pdf", uploaded)
+            self.assertTrue((folder / "sources" / "reading.pdf").is_file())
+
+            with urllib.request.urlopen(base + "/class/biology-101/assignments/lab-report/sources/reading.pdf", timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b"%PDF-1.4 demo\n")
+
+            status, missing = _request(base + "/class/not-a-class")
+            self.assertEqual(status, 404)
+            self.assertIn("not in the classes folder", missing)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -123,7 +123,7 @@
     border-top: 1px solid var(--line);
     padding: 8px;
   }
-  #again {
+  #classes, #again {
     display: block;
     width: 100%;
     margin-bottom: 8px;
@@ -170,6 +170,7 @@
   <div id="transcript"></div>
   <div id="status"></div>
   <div id="composer">
+    <button id="classes" type="button">Classes</button>
     <button id="again" type="button">Another screenshot</button>
     <form id="followup">
       <input id="question" type="text" placeholder="Ask a follow-up about this screen" autocomplete="off" spellcheck="true">
@@ -183,6 +184,7 @@
     const send = document.getElementById("send");
     const copy = document.getElementById("copy");
     const again = document.getElementById("again");
+    const classes = document.getElementById("classes");
 
     function post(payload) {
       try {
@@ -321,6 +323,10 @@
     again.addEventListener("click", () => {
       if (again.disabled) return;
       post({ action: "again" });
+    });
+
+    classes.addEventListener("click", () => {
+      post({ action: "library" });
     });
 
     copy.addEventListener("click", () => {

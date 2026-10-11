@@ -254,6 +254,8 @@ local function onWebMessage(message)
     M.followup(tostring(body.text or ""))
   elseif body.action == "again" then
     M.captureAgain()
+  elseif body.action == "library" then
+    M.openLibrary()
   end
 end
 
@@ -498,6 +500,63 @@ local function captureScreen(screen)
     return nil, "Could not save the screenshot. Enable Screen Recording for Hammerspoon, then quit and reopen Hammerspoon."
   end
   return path
+end
+
+local function libraryHealthy()
+  local output, ok = hs.execute("/usr/bin/curl -fsS --max-time 1 http://127.0.0.1:8766/health")
+  return ok and type(output) == "string" and output:find("jarvis-classes", 1, true) ~= nil
+end
+
+function M.openLibrary()
+  if not state.root then
+    hs.notify.show("Jarvis", "", "The assistant is not installed. Run scripts/install.sh.")
+    return
+  end
+  local function openPage()
+    hs.urlevent.openURL("http://127.0.0.1:8766/")
+  end
+  if libraryHealthy() then
+    openPage()
+    return
+  end
+  local running = false
+  if state.libraryTask then
+    local ok, active = pcall(function() return state.libraryTask:isRunning() end)
+    running = ok and active
+  end
+  if not running then
+    local script = state.root .. "/scripts/run.sh"
+    local task = hs.task.new("/bin/bash", function()
+      return false
+    end, { script, "classes", "serve" })
+    if not task then
+      hs.notify.show("Jarvis", "", "The classes window could not open.")
+      return
+    end
+    task:setWorkingDirectory(state.root)
+    state.libraryTask = task
+    _G.macAILibraryTask = task
+    if not task:start() then
+      state.libraryTask = nil
+      _G.macAILibraryTask = nil
+      hs.notify.show("Jarvis", "", "The classes window could not open.")
+      return
+    end
+  end
+  local attempts = 0
+  local function poll()
+    attempts = attempts + 1
+    if libraryHealthy() then
+      openPage()
+      return
+    end
+    if attempts < 10 then
+      hs.timer.doAfter(0.25, poll)
+    else
+      hs.notify.show("Jarvis", "", "The classes window could not open.")
+    end
+  end
+  poll()
 end
 
 function M.captureAgain()
