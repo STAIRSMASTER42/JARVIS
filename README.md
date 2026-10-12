@@ -81,7 +81,7 @@ The window opens without taking a screenshot. Press **Add screenshot** when you 
 
 Pressing the shortcut again while a request is running does not start a second request.
 
-Type a follow-up in the box at the bottom and press Return. **Add screenshot** captures the display again and keeps this conversation, so the next page or question stays in the same context. Text in the box is sent with that screenshot. Closing the panel ends the session.
+Type in the box and press Return to talk to Jarvis. A screenshot is optional. **Add screenshot** captures the display and keeps this conversation, so a later page or question stays in the same context. Text in the box is sent with that screenshot. Closing the panel ends the session.
 
 ### Quit or disable
 
@@ -128,7 +128,7 @@ You can also ask in the popup, for example: "Add my Biology 101 class" or "Save 
 
 On a quiz or assignment, Jarvis answers the question and uses the matching class files, assignment notes, and source documents as context. On a textbook screenshot, it saves notes into that class or assignment. If it cannot tell which class the screen belongs to, it asks. After it changes a file, the reply names the file.
 
-**Classes** in the popup opens a page in your browser. Pick a class, then an assignment, to read the notes Jarvis saved. Use **Add file** on an assignment to attach any source. Jarvis can read text, PDF, and Word files, and it can see the names of other files you add.
+**Classes** in the popup opens a page in your browser. **To-do** lists assignments from every class. Filter it to what is due in 1, 7, 30, or 90 days. Due dates need to be calendar dates, such as 2026-10-15. Pick a class, then an assignment, to read the notes Jarvis saved. **Class files** on a class are for anything that is not tied to one assignment, such as a syllabus. Use **Add file** on an assignment to attach a source for that assignment only. Jarvis can read text, PDF, and Word files, and it can see the names of other files you add.
 
 **My writing** on that page is not a class. Add your own writing there. When you ask Jarvis to write like you, it reads that file and matches your voice. Jarvis cannot add to it.
 

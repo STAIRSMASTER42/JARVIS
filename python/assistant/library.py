@@ -8,6 +8,7 @@ import json
 import mimetypes
 import re
 import threading
+from datetime import date
 from email import policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +21,9 @@ from assistant.classes import (
     course_title,
     ensure_workspace,
     list_assignments,
+    class_files_dir,
+    list_class_files,
+    save_class_file,
     save_source,
     source_filename,
 )
@@ -32,6 +36,7 @@ from assistant.practice import (
     public_questions,
     question_by_id,
 )
+from assistant.todo import WINDOWS, TodoItem, collect_todos, due_phrase, filter_todos
 from assistant.writing import add_writing, piece_count, writing_file
 
 LIBRARY_PORT = 8766
@@ -40,6 +45,8 @@ _ASSIGNMENT_PATH = re.compile(r"^/class/([^/]+)/assignments/([^/]+)$")
 _ASSIGNMENT_POST = re.compile(r"^/class/([^/]+)/assignments$")
 _SOURCE_POST = re.compile(r"^/class/([^/]+)/assignments/([^/]+)/sources$")
 _SOURCE_GET = re.compile(r"^/class/([^/]+)/assignments/([^/]+)/sources/([^/]+)$")
+_CLASS_FILE_POST = re.compile(r"^/class/([^/]+)/files$")
+_CLASS_FILE_GET = re.compile(r"^/class/([^/]+)/files/([^/]+)$")
 _PRACTICE_PATH = re.compile(r"^/class/([^/]+)/practice/([^/]+)(/review)?(/(questions|grade))?$")
 
 _STYLE = """
@@ -130,6 +137,16 @@ textarea {
 form.stack { flex-direction: column; align-items: stretch; }
 .error { color: var(--danger); padding: 12px 14px; }
 .file { margin: 0 0 8px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 16px; }
+.filters a {
+  text-decoration: none;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: inherit;
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+.filters a.active { background: var(--accent); color: white; border-color: transparent; }
 .prompt { font-size: 18px; margin: 0 0 12px; }
 .choice { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 8px; }
 .quiz-actions { display: flex; gap: 8px; margin: 16px 0; }
@@ -220,11 +237,77 @@ def classes_page(root: Path, error: str = "") -> str:
     body = (
         _banner(error)
         + "<h1>Classes</h1><p class='sub'>Choose a class to see its assignments.</p>"
+        + _todo_card(root)
         + cards
         + "<h2 class='section'>Not a class</h2>"
         + _writing_card(root)
     )
     return page("Classes", body)
+
+
+def _todo_card(root: Path) -> str:
+    today = date.today()
+    count = len(filter_todos(collect_todos(root, today), today, 7))
+    if count == 0:
+        detail = "Assignments from every class"
+    elif count == 1:
+        detail = "1 assignment due within 7 days"
+    else:
+        detail = f"{count} assignments due within 7 days"
+    return f'<a class="card" href="/todo"><strong>To-do</strong><span>{detail}</span></a>'
+
+
+def todo_page(root: Path, days: int | None) -> str:
+    today = date.today()
+    items = filter_todos(collect_todos(root, today), today, days)
+    filters = ['<a href="/todo"' + ("" if days is not None else ' class="active"') + ">All</a>"]
+    for window in WINDOWS:
+        active = ' class="active"' if days == window else ""
+        label = "1 day" if window == 1 else f"{window} days"
+        filters.append(f'<a href="/todo?days={window}"{active}>{label}</a>')
+    overdue = [item for item in items if (item.days_until(today) or 0) < 0]
+    upcoming = [item for item in items if item.due is not None and (item.days_until(today) or 0) >= 0]
+    undated = [item for item in items if item.due is None]
+    sections: list[str] = []
+    if overdue:
+        sections.append("<h2 class='section'>Overdue</h2>" + _todo_cards(overdue, today))
+    if upcoming:
+        heading = "Due" if days is not None else "Upcoming"
+        sections.append(f"<h2 class='section'>{heading}</h2>" + _todo_cards(upcoming, today))
+    if undated and days is None:
+        sections.append("<h2 class='section'>No due date</h2>" + _todo_cards(undated, today))
+    if not sections:
+        if days is None:
+            empty = "No assignments yet."
+        else:
+            span = "1 day" if days == 1 else f"{days} days"
+            empty = f"Nothing due in the next {span}."
+        sections.append(f"<p class='muted'>{empty}</p>")
+    note = ""
+    if days is not None:
+        note = "<p class='muted'>Assignments without a calendar date stay on All.</p>"
+    body = (
+        "<h1>To-do</h1>"
+        "<p class='sub'><a href='/'>All classes</a></p>"
+        f"<div class='filters'>{''.join(filters)}</div>"
+        + "".join(sections)
+        + note
+    )
+    return page("To-do", body)
+
+
+def _todo_cards(items: list[TodoItem], today: date) -> str:
+    cards: list[str] = []
+    for item in items:
+        href = f"/class/{quote(item.class_folder)}/assignments/{quote(item.slug)}"
+        when = due_phrase(item, today)
+        if item.due_text and item.due_text.lower() != "unknown":
+            when = f"{when} · {item.due_text}"
+        cards.append(
+            f'<a class="card" href="{href}"><strong>{html.escape(item.title)}</strong>'
+            f"<span>{html.escape(item.class_title)} · {html.escape(when)}</span></a>"
+        )
+    return "\n".join(cards)
 
 
 def _writing_card(classes_root: Path) -> str:
@@ -282,12 +365,27 @@ def class_page(root: Path, class_folder: str, error: str = "") -> str:
         f"<h2 class='section'>Assignments</h2>{cards}"
         f"<form method='post' action='{action}'>"
         f"<input type='text' name='title' required placeholder='Assignment title'>"
-        f"<input type='text' name='due' placeholder='Due date'>"
+        f"<input type='text' name='due' placeholder='Due date (2026-10-15)'>"
         f"<button type='submit'>Add assignment</button></form>"
         f"<h2 class='section'>Practice tests</h2>{_practice_cards(root, class_folder)}"
+        f"<h2 class='section'>Class files</h2>{_class_file_links(class_folder, root)}"
+        f"<form method='post' action='/class/{quote(class_folder)}/files' enctype='multipart/form-data'>"
+        f"<input type='file' name='source' required>"
+        f"<button type='submit'>Add file</button></form>"
         f"<h2 class='section'>Class notes</h2><div class='note'>{render_note(notes)}</div>"
     )
     return page(title, body)
+
+
+def _class_file_links(class_folder: str, root: Path) -> str:
+    names = list_class_files(root, class_folder)
+    if not names:
+        return "<p class='muted'>No class files yet. Add a syllabus, slides, or any other file that is not for one assignment.</p>"
+    items = [
+        f'<p class="file"><a href="/class/{quote(class_folder)}/files/{quote(name)}">{html.escape(name)}</a></p>'
+        for name in names
+    ]
+    return "\n".join(items)
 
 
 def _practice_cards(root: Path, class_folder: str) -> str:
@@ -517,6 +615,17 @@ def _source_links(class_folder: str, assignment_folder: str, sources: Path) -> s
     return "\n".join(items)
 
 
+def _stored_class_file(root: Path, class_folder: str, filename: str) -> Path:
+    folder = class_files_dir(root, class_folder) / source_filename(filename)
+    if folder.is_symlink() or not folder.is_file():
+        raise AssistantError("class_file", "That class file does not exist.")
+    resolved = folder.resolve()
+    allowed = class_files_dir(root, class_folder).resolve()
+    if resolved != allowed and allowed not in resolved.parents:
+        raise AssistantError("class_file", "That path is outside the classes folder.")
+    return folder
+
+
 def source_file(root: Path, class_folder: str, assignment_folder: str, filename: str) -> Path:
     folder = _assignment_dir(root, class_folder, assignment_folder) / "sources" / source_filename(filename)
     if folder.is_symlink() or not folder.is_file():
@@ -546,6 +655,11 @@ class LibraryHandler(BaseHTTPRequestHandler):
             if path == "/":
                 self._send_html(classes_page(root, error))
                 return
+            if path == "/todo":
+                raw_days = parse_qs(parsed.query).get("days", [""])[0]
+                chosen = int(raw_days) if raw_days in {str(window) for window in WINDOWS} else None
+                self._send_html(todo_page(root, chosen))
+                return
             if path == "/writing":
                 self._send_html(writing_page(root, error))
                 return
@@ -564,6 +678,10 @@ class LibraryHandler(BaseHTTPRequestHandler):
             source_match = _SOURCE_GET.match(path)
             if source_match:
                 self._send_file(source_file(root, source_match.group(1), source_match.group(2), source_match.group(3)))
+                return
+            class_file_match = _CLASS_FILE_GET.match(path)
+            if class_file_match:
+                self._send_file(_stored_class_file(root, class_file_match.group(1), class_file_match.group(2)))
                 return
         except AssistantError:
             self._send_html(page("Not found", "<p>That page is not in the classes folder.</p><p><a href='/'>Back to classes</a></p>"), 404)
@@ -587,6 +705,10 @@ class LibraryHandler(BaseHTTPRequestHandler):
         if source_post:
             self._upload_source(root, source_post.group(1), source_post.group(2), content_type, body)
             return
+        class_file_post = _CLASS_FILE_POST.match(path)
+        if class_file_post:
+            self._upload_class_file(root, class_file_post.group(1), content_type, body)
+            return
         if path == "/writing":
             self._add_writing(root, body)
             return
@@ -607,6 +729,16 @@ class LibraryHandler(BaseHTTPRequestHandler):
             self._redirect(back + "?error=" + quote(exc.message))
             return
         self._redirect(f"{back}/assignments/{quote(folder.name)}")
+
+    def _upload_class_file(self, root: Path, class_folder: str, content_type: str, body: bytes) -> None:
+        back = "/class/" + quote(class_folder)
+        try:
+            filename, data = _uploaded_file(content_type, body)
+            save_class_file(root, class_folder, filename, data)
+        except AssistantError as exc:
+            self._redirect(back + "?error=" + quote(exc.message))
+            return
+        self._redirect(back)
 
     def _upload_source(self, root: Path, class_folder: str, assignment_folder: str, content_type: str, body: bytes) -> None:
         back = f"/class/{quote(class_folder)}/assignments/{quote(assignment_folder)}"

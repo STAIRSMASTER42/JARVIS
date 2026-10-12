@@ -18,15 +18,17 @@ CLASS_GUIDANCE = (
     "The class files you can read and edit are cataloged below. They are on this computer, and they count as known context. "
     "Layout: <class>/notes.md holds class notes. "
     "<class>/assignments/<assignment>/assignment.md describes one assignment, and notes.md in that folder holds its notes. "
-    "<class>/assignments/<assignment>/sources/ holds any files the user attached. "
+    "<class>/files/ holds files the user added for the whole class, not for one assignment. "
+    "<class>/assignments/<assignment>/sources/ holds files the user attached to that assignment. "
     "<class>/practice-tests/<name>/ holds one practice test. A class can have several, such as Unit 1, Unit 2, and a midterm. "
     "Create a practice test only when the user asks. Use create_practice_test, base every question on the class notes, sources, or the screen, and do not invent facts. "
     "Read the relevant notes and sources before you answer a question or complete an assignment. "
     "Create an assignment folder when the user names an assignment or when a screenshot is clearly about one. "
+    "Write the due date as a calendar date such as 2026-10-15 so the to-do list can filter it. "
     "Write textbook notes that belong to an assignment into that assignment's notes.md, and other textbook notes into the class notes.md. "
     "You can create and edit note files, and you can delete a class or assignment folder when the user asks you to remove it. "
     "Deleting a folder removes the notes and source files inside it. Do not delete a folder unless the user asked. "
-    "The user adds source files of any type from the Classes window. "
+    "The user adds class files and assignment source files of any type from the Classes window. You cannot create those files. "
     "My writing is not a class. Only the user adds to that file. Read it when they ask you to write like them. "
     "You can read text, PDF, and Word sources. For other files, use the file name and say when the contents could not be extracted. "
     "If you cannot tell which class or assignment a screen belongs to, ask instead of guessing. "
@@ -42,6 +44,7 @@ Each class is a folder:
 
 - `course.md` — name, term, instructor, schedule, and what the class is about
 - `notes.md` — notes for the class
+- `files/` — files for the whole class, such as a syllabus or slides
 - `assignments/<name>/` — one assignment, with `notes.md` and a `sources` folder for any files you add
 
 Add a class from the project directory:
@@ -245,6 +248,44 @@ def add_assignment(root: Path, class_folder: str, title: str, due: str = "") -> 
     return folder
 
 
+def class_files_dir(root: Path, class_folder: str) -> Path:
+    folder = _course_dir(root, class_folder) / "files"
+    if folder.is_symlink():
+        raise AssistantError("class_file", "That class files folder is not allowed.")
+    return folder
+
+
+def list_class_files(root: Path, class_folder: str) -> list[str]:
+    folder = class_files_dir(root, class_folder)
+    if not folder.is_dir():
+        return []
+    return sorted(
+        path.name
+        for path in folder.iterdir()
+        if path.is_file() and not path.is_symlink() and not path.name.startswith(".")
+    )
+
+
+def save_class_file(root: Path, class_folder: str, filename: str, data: bytes) -> Path:
+    """Store a file the user added for a whole class, outside any assignment."""
+    if not data:
+        raise AssistantError("class_file", "That file is empty.")
+    if len(data) > _MAX_SOURCE_BYTES:
+        raise AssistantError("class_file", "That file is larger than 25 MB.")
+    safe_name = source_filename(filename)
+    folder = class_files_dir(root, class_folder)
+    folder.mkdir(exist_ok=True)
+    destination = _unique_source(folder, safe_name)
+    resolved = destination.resolve()
+    root_resolved = root.resolve()
+    if resolved != root_resolved and root_resolved not in resolved.parents:
+        raise AssistantError("class_file", "That path is outside the classes folder.")
+    if destination.is_symlink():
+        raise AssistantError("class_file", "That class file is not allowed.")
+    destination.write_bytes(data)
+    return destination
+
+
 def save_source(root: Path, class_folder: str, assignment_folder: str, filename: str, data: bytes) -> Path:
     """Store a file the user attached to an assignment."""
     if not data:
@@ -312,8 +353,10 @@ def catalog(root: Path) -> str:
             if path.is_file() and not path.is_symlink() and path.suffix.lower() in _SUFFIXES
         )
         listed = ", ".join(files) if files else "(no text files yet)"
+        class_files = list_class_files(root, course.name)
+        attached = ", ".join(class_files) if class_files else "none yet"
         lines.append(
-            f"- {course.name}: {course_title(course)} — files: {listed} — assignments: {_catalog_assignments(course)} — practice tests: {_catalog_practice_tests(root, course.name)}"
+            f"- {course.name}: {course_title(course)} — files: {listed} — class files: {attached} — assignments: {_catalog_assignments(course)} — practice tests: {_catalog_practice_tests(root, course.name)}"
         )
     return "\n".join(lines)
 
@@ -353,6 +396,7 @@ def class_tools() -> list[dict[str, Any]]:
         "type": "string",
         "description": (
             "Path relative to the classes folder, such as biology-101/notes.md, "
+            "biology-101/notes.md, biology-101/files/syllabus.pdf, "
             "biology-101/assignments/essay/notes.md, or biology-101/assignments/essay/sources/reading.pdf."
         ),
     }
@@ -374,7 +418,10 @@ def class_tools() -> list[dict[str, Any]]:
                 {
                     "class_folder": {"type": "string", "description": "Class folder name, such as biology-101."},
                     "title": {"type": "string", "description": "Assignment title."},
-                    "due": {"type": "string", "description": "Due date, or an empty string if it is unknown."},
+                    "due": {
+                        "type": "string",
+                        "description": "Calendar due date such as 2026-10-15, or an empty string if it is unknown.",
+                    },
                 },
                 ["class_folder", "title", "due"],
             ),

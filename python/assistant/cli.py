@@ -126,13 +126,8 @@ def analyze(
 
 
 def followup(previous_id: str, text: str, config_path: Path | None) -> dict[str, Any]:
-    if not previous_id.strip():
-        raise AssistantError(
-            "bad_response",
-            "This answer cannot be continued. Take a new screenshot and try again.",
-        )
     if not text.strip():
-        raise AssistantError("bad_request", "Enter a follow-up question first.")
+        raise AssistantError("bad_request", "Enter a message first.")
     config = load_config(config_path)
     workspace = _class_workspace(config)
     instructions, tools, execute = _local_context(config, workspace)
@@ -144,7 +139,7 @@ def followup(previous_id: str, text: str, config_path: Path | None) -> dict[str,
     payload = api.build_followup_request(
         model=config["model"],
         instructions=instructions,
-        previous_response_id=previous_id.strip(),
+        previous_response_id=previous_id.strip() if previous_id else "",
         text=text.strip(),
         max_output_tokens=output_tokens,
         tools=tools,
@@ -199,8 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not delete the screenshot (debugging only)",
     )
 
-    follow_parser = subparsers.add_parser("followup", help="Continue the current screenshot session")
-    follow_parser.add_argument("--previous-id", required=True)
+    follow_parser = subparsers.add_parser("followup", help="Send a message, continuing the conversation when one exists")
+    follow_parser.add_argument("--previous-id", default="")
     follow_parser.add_argument("--text", required=True)
     follow_parser.add_argument("--config")
 

@@ -76,6 +76,31 @@ class LibraryPageTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertEqual(response.read(), b"%PDF-1.4 demo\n")
 
+            status, course = _request(base + "/class/biology-101")
+            self.assertEqual(status, 200)
+            self.assertIn("Class files", course)
+            self.assertIn("not for one assignment", course)
+
+            class_payload = (
+                f"--{boundary}\r\n"
+                'Content-Disposition: form-data; name="source"; filename="../syllabus.pdf"\r\n'
+                "Content-Type: application/pdf\r\n\r\n"
+            ).encode() + b"%PDF syllabus\n" + f"\r\n--{boundary}--\r\n".encode()
+            class_upload = urllib.request.Request(
+                base + "/class/biology-101/files",
+                data=class_payload,
+                method="POST",
+            )
+            class_upload.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+            with urllib.request.urlopen(class_upload, timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn("syllabus.pdf", response.read().decode("utf-8"))
+            stored = root / "biology-101" / "files" / "syllabus.pdf"
+            self.assertTrue(stored.is_file())
+            self.assertFalse((folder / "sources" / "syllabus.pdf").exists())
+            with urllib.request.urlopen(base + "/class/biology-101/files/syllabus.pdf", timeout=2) as response:
+                self.assertEqual(response.read(), b"%PDF syllabus\n")
+
             status, missing = _request(base + "/class/not-a-class")
             self.assertEqual(status, 404)
             self.assertIn("not in the classes folder", missing)

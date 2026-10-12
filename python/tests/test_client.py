@@ -89,6 +89,17 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(payload["input"], "Why that choice?")
         self.assertNotIn("image_url", str(payload["input"]))
 
+    def test_message_can_start_without_a_screenshot(self) -> None:
+        payload = build_followup_request(
+            model="gpt-5.4-mini",
+            instructions="Be concise.",
+            text="Help me study unit 1.",
+            max_output_tokens=800,
+        )
+        self.assertNotIn("previous_response_id", payload)
+        self.assertNotIn("input_image", str(payload))
+        self.assertEqual(payload["input"], "Help me study unit 1.")
+
     def test_connection_request_has_no_image(self) -> None:
         payload = build_connection_request(model="gpt-5.4-mini")
         self.assertNotIn("input_image", str(payload))

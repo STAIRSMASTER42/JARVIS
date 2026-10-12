@@ -51,8 +51,10 @@
     padding: 8px 10px;
     border-bottom: 1px solid var(--line);
   }
+  .brand { display: flex; flex-direction: column; min-width: 0; }
   header strong { font-size: 12px; font-weight: 600; }
-  header span { color: var(--muted); font-size: 11px; }
+  header span { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar { display: flex; align-items: center; gap: 6px; flex: none; }
   button, input {
     font: inherit;
     color: inherit;
@@ -124,14 +126,11 @@
     padding: 8px;
   }
   #classes, #again {
-    display: block;
-    width: 100%;
-    margin-bottom: 8px;
     border: 1px solid var(--line);
     background: var(--card);
     color: var(--text);
     border-radius: 8px;
-    padding: 7px 10px;
+    padding: 5px 8px;
   }
   form {
     display: flex;
@@ -158,22 +157,21 @@
 </head>
 <body>
   <header>
-    <div>
+    <div class="brand">
       <strong>Jarvis</strong>
       <span id="hint">School help on this Mac</span>
     </div>
-    <div>
+    <div class="topbar">
+      <button id="classes" type="button">Classes</button>
+      <button id="again" type="button">Add screenshot</button>
       <button id="copy" type="button">Copy</button>
-      <button id="close" type="button">Close</button>
     </div>
   </header>
   <div id="transcript"></div>
   <div id="status"></div>
   <div id="composer">
-    <button id="classes" type="button">Classes</button>
-    <button id="again" type="button">Add screenshot</button>
     <form id="followup">
-      <input id="question" type="text" placeholder="Ask a follow-up about this screen" autocomplete="off" spellcheck="true">
+      <input id="question" type="text" placeholder="Ask Jarvis" autocomplete="off" spellcheck="true">
       <button id="send" type="submit">Send</button>
     </form>
   </div>
@@ -338,8 +336,6 @@
         .filter(Boolean);
       post({ action: "copy", text: parts.join("\n\n") });
     });
-
-    document.getElementById("close").addEventListener("click", () => post({ action: "close" }));
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {

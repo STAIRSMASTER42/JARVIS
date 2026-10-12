@@ -643,23 +643,22 @@ function M.followup(text)
     callJS("flash", "A request is already running.")
     return
   end
-  if not state.responseId or state.responseId == "" then
-    callJS("showError", "Add a screenshot before asking a follow-up.")
-    return
-  end
   state.busy = true
   state.session = state.session + 1
   local session = state.session
   callJS("addUser", text)
-  runPython(session, {
+  local args = {
     "followup",
-    "--previous-id",
-    state.responseId,
     "--text",
     text,
     "--config",
     CONFIG_PATH,
-  })
+  }
+  if state.responseId and state.responseId ~= "" then
+    table.insert(args, "--previous-id")
+    table.insert(args, state.responseId)
+  end
+  runPython(session, args)
 end
 
 function M.show(force)

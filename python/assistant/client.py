@@ -49,18 +49,20 @@ def build_followup_request(
     *,
     model: str,
     instructions: str,
-    previous_response_id: str,
     text: str,
     max_output_tokens: int,
+    previous_response_id: str = "",
     tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
         "instructions": instructions,
-        "previous_response_id": previous_response_id,
         "max_output_tokens": max_output_tokens,
         "input": text,
     }
+    continued = previous_response_id.strip()
+    if continued:
+        payload["previous_response_id"] = continued
     if tools:
         payload["tools"] = tools
     return payload
