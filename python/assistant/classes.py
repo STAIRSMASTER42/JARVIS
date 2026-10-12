@@ -19,6 +19,8 @@ CLASS_GUIDANCE = (
     "Layout: <class>/notes.md holds class notes. "
     "<class>/assignments/<assignment>/assignment.md describes one assignment, and notes.md in that folder holds its notes. "
     "<class>/assignments/<assignment>/sources/ holds any files the user attached. "
+    "<class>/practice-tests/<name>/ holds one practice test. A class can have several, such as Unit 1, Unit 2, and a midterm. "
+    "Create a practice test only when the user asks. Use create_practice_test, base every question on the class notes, sources, or the screen, and do not invent facts. "
     "Read the relevant notes and sources before you answer a question or complete an assignment. "
     "Create an assignment folder when the user names an assignment or when a screenshot is clearly about one. "
     "Write textbook notes that belong to an assignment into that assignment's notes.md, and other textbook notes into the class notes.md. "
@@ -311,9 +313,18 @@ def catalog(root: Path) -> str:
         )
         listed = ", ".join(files) if files else "(no text files yet)"
         lines.append(
-            f"- {course.name}: {course_title(course)} — files: {listed} — assignments: {_catalog_assignments(course)}"
+            f"- {course.name}: {course_title(course)} — files: {listed} — assignments: {_catalog_assignments(course)} — practice tests: {_catalog_practice_tests(root, course.name)}"
         )
     return "\n".join(lines)
+
+
+def _catalog_practice_tests(root: Path, class_folder: str) -> str:
+    from assistant.practice import list_practice_tests
+
+    items = list_practice_tests(root, class_folder)
+    if not items:
+        return "none yet"
+    return "; ".join(f"{item['slug']} ({item['title']}, {item['count']} questions)" for item in items)
 
 
 def _catalog_assignments(course: Path) -> str:
@@ -366,6 +377,29 @@ def class_tools() -> list[dict[str, Any]]:
                     "due": {"type": "string", "description": "Due date, or an empty string if it is unknown."},
                 },
                 ["class_folder", "title", "due"],
+            ),
+        ),
+        _tool(
+            "create_practice_test",
+            (
+                "Create or replace one practice test for a class. The user takes it from that class in the Classes window. "
+                "A class can have many tests. Use a specific title such as Unit 1, Unit 2, or Midterm. "
+                "Create one only when the user asks. Questions must use this format, with a blank line between questions: "
+                "ID, TYPE (MC, TF, or SALL), PROMPT, CHOICES, ANSWER, and optional EXPLANATION. "
+                "MC ANSWER is one letter. TF ANSWER is TRUE or FALSE and can omit CHOICES. "
+                "SALL ANSWER is comma-separated letters such as A,C. "
+                "Base every question on the class notes, sources, or the screen. Do not invent facts."
+            ),
+            _object(
+                {
+                    "class_folder": {"type": "string", "description": "Class folder name, such as biology-101."},
+                    "title": {"type": "string", "description": "Test title, such as Unit 1 or Midterm."},
+                    "questions": {
+                        "type": "string",
+                        "description": "The full questions.txt contents in the practice-test format.",
+                    },
+                },
+                ["class_folder", "title", "questions"],
             ),
         ),
         _tool(
@@ -449,6 +483,20 @@ class ClassWorkspace:
             payload = _arguments(arguments)
             if name == "list_class_files":
                 return catalog(self.root)
+            if name == "create_practice_test":
+                from assistant.practice import save_practice_test
+
+                path, count, replaced = save_practice_test(
+                    self.root,
+                    str(payload.get("class_folder", "")),
+                    str(payload.get("title", "")),
+                    str(payload.get("questions", "")),
+                )
+                stored = _relative(self.root, path)
+                self._mark(stored)
+                verb = "Updated" if replaced else "Created"
+                label = "1 question" if count == 1 else f"{count} questions"
+                return f"{verb} {stored} with {label}."
             if name == "create_assignment":
                 folder = add_assignment(
                     self.root,

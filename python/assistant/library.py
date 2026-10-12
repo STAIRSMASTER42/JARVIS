@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import email
 import html
+import json
 import mimetypes
 import re
 import threading
@@ -23,6 +24,14 @@ from assistant.classes import (
     source_filename,
 )
 from assistant.errors import AssistantError
+from assistant.practice import (
+    grade_answer,
+    list_practice_tests,
+    load_questions,
+    mark_for_review,
+    public_questions,
+    question_by_id,
+)
 from assistant.writing import add_writing, piece_count, writing_file
 
 LIBRARY_PORT = 8766
@@ -31,6 +40,7 @@ _ASSIGNMENT_PATH = re.compile(r"^/class/([^/]+)/assignments/([^/]+)$")
 _ASSIGNMENT_POST = re.compile(r"^/class/([^/]+)/assignments$")
 _SOURCE_POST = re.compile(r"^/class/([^/]+)/assignments/([^/]+)/sources$")
 _SOURCE_GET = re.compile(r"^/class/([^/]+)/assignments/([^/]+)/sources/([^/]+)$")
+_PRACTICE_PATH = re.compile(r"^/class/([^/]+)/practice/([^/]+)(/review)?(/(questions|grade))?$")
 
 _STYLE = """
 :root {
@@ -120,6 +130,13 @@ textarea {
 form.stack { flex-direction: column; align-items: stretch; }
 .error { color: var(--danger); padding: 12px 14px; }
 .file { margin: 0 0 8px; }
+.prompt { font-size: 18px; margin: 0 0 12px; }
+.choice { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 8px; }
+.quiz-actions { display: flex; gap: 8px; margin: 16px 0; }
+.feedback { font-weight: 600; margin: 0; }
+.feedback.ok { color: #1b7f3a; }
+.feedback.bad { color: var(--danger); }
+#explanation { margin: 8px 0 0; }
 """
 
 
@@ -191,6 +208,9 @@ def classes_page(root: Path, error: str = "") -> str:
         for course in courses:
             count = len(list_assignments(root, course.name))
             label = "1 assignment" if count == 1 else f"{count} assignments"
+            practice_count = len(list_practice_tests(root, course.name))
+            if practice_count:
+                label += " · " + ("1 practice test" if practice_count == 1 else f"{practice_count} practice tests")
             href = "/class/" + quote(course.name)
             items.append(
                 f'<a class="card" href="{href}"><strong>{html.escape(course_title(course))}</strong>'
@@ -264,7 +284,157 @@ def class_page(root: Path, class_folder: str, error: str = "") -> str:
         f"<input type='text' name='title' required placeholder='Assignment title'>"
         f"<input type='text' name='due' placeholder='Due date'>"
         f"<button type='submit'>Add assignment</button></form>"
+        f"<h2 class='section'>Practice tests</h2>{_practice_cards(root, class_folder)}"
         f"<h2 class='section'>Class notes</h2><div class='note'>{render_note(notes)}</div>"
+    )
+    return page(title, body)
+
+
+def _practice_cards(root: Path, class_folder: str) -> str:
+    tests = list_practice_tests(root, class_folder)
+    if not tests:
+        return "<p class='muted'>No practice tests yet. Ask Jarvis for one, such as Unit 1 or a midterm.</p>"
+    items: list[str] = []
+    for item in tests:
+        count = int(item["count"])
+        count_label = "1 question" if count == 1 else f"{count} questions"
+        href = f"/class/{quote(class_folder)}/practice/{quote(str(item['slug']))}"
+        items.append(
+            f'<a class="card" href="{href}"><strong>{html.escape(str(item["title"]))}</strong>'
+            f"<span>{count_label}</span></a>"
+        )
+        if int(item["review_count"]):
+            items.append(f'<p class="file"><a href="{href}/review">Review marked questions</a></p>')
+    return "\n".join(items)
+
+
+def quiz_page(root: Path, class_folder: str, test_folder: str, *, review: bool = False) -> str:
+    title, _questions = load_questions(root, class_folder, test_folder, review=review)
+    back = f"/class/{quote(class_folder)}"
+    base = f"{back}/practice/{quote(test_folder)}" + ("/review" if review else "")
+    body = (
+        f"<h1>{html.escape(title)}</h1>"
+        f"<p class='sub'><a href='{back}'>Back to class</a></p>"
+        "<p id='quiz-header' class='sub'></p><div id='quiz'></div>"
+        "<script>\n"
+        f"const questionsUrl = {json.dumps(base + '/questions')};\n"
+        f"const gradeUrl = {json.dumps(base + '/grade')};\n"
+        f"const showReview = {str(not review).lower()};\n"
+        """const header = document.getElementById("quiz-header");
+const quiz = document.getElementById("quiz");
+let questions = [];
+let index = 0;
+let correctCount = 0;
+
+function el(tag, text) {
+  const node = document.createElement(tag);
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function render() {
+  quiz.replaceChildren();
+  const question = questions[index];
+  header.textContent = "Question " + (index + 1) + " / " + questions.length;
+  const prompt = el("p", question.prompt);
+  prompt.className = "prompt";
+  quiz.appendChild(prompt);
+  if (question.type === "SALL") quiz.appendChild(el("p", "Select all that apply."));
+  question.choices.forEach((choice) => {
+    const row = el("label");
+    row.className = "choice";
+    const input = document.createElement("input");
+    input.type = question.type === "SALL" ? "checkbox" : "radio";
+    input.name = "choice";
+    input.value = choice.label;
+    row.appendChild(input);
+    row.appendChild(document.createTextNode(" " + choice.label + ") " + choice.text));
+    quiz.appendChild(row);
+  });
+  if (showReview) {
+    const reviewRow = el("label");
+    reviewRow.className = "choice";
+    const reviewInput = document.createElement("input");
+    reviewInput.type = "checkbox";
+    reviewInput.id = "mark-review";
+    reviewRow.appendChild(reviewInput);
+    reviewRow.appendChild(document.createTextNode(" Mark for review"));
+    quiz.appendChild(reviewRow);
+  }
+  const actions = el("div");
+  actions.className = "quiz-actions";
+  const submit = el("button", "Submit");
+  submit.type = "button";
+  const next = el("button", index + 1 === questions.length ? "Finish" : "Next");
+  next.type = "button";
+  next.disabled = true;
+  const feedback = el("p", "");
+  feedback.id = "feedback";
+  const explanation = el("p", "");
+  explanation.id = "explanation";
+  actions.append(submit, next);
+  quiz.append(actions, feedback, explanation);
+  submit.addEventListener("click", () => submitAnswer(question, submit, next, feedback, explanation));
+  next.addEventListener("click", () => {
+    index += 1;
+    if (index >= questions.length) showScore();
+    else render();
+  });
+}
+
+async function submitAnswer(question, submit, next, feedback, explanation) {
+  const selected = Array.from(quiz.querySelectorAll("input[name=choice]:checked")).map((node) => node.value);
+  if (!selected.length) {
+    feedback.textContent = "Choose an answer.";
+    feedback.className = "feedback bad";
+    return;
+  }
+  submit.disabled = true;
+  const reviewBox = document.getElementById("mark-review");
+  const response = await fetch(gradeUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: question.id,
+      selected: selected,
+      review: !!(reviewBox && reviewBox.checked)
+    })
+  });
+  const result = await response.json();
+  quiz.querySelectorAll("input").forEach((node) => { node.disabled = true; });
+  if (!result.ok) {
+    feedback.textContent = result.error || "That answer could not be checked.";
+    feedback.className = "feedback bad";
+    submit.disabled = false;
+    quiz.querySelectorAll("input").forEach((node) => { node.disabled = false; });
+    return;
+  }
+  if (result.correct) correctCount += 1;
+  feedback.textContent = result.correct ? "Correct!" : "Incorrect.";
+  feedback.className = result.correct ? "feedback ok" : "feedback bad";
+  const parts = [];
+  if (!result.correct && result.answer_text) parts.push("Answer: " + result.answer_text);
+  if (result.explanation) parts.push(result.explanation);
+  explanation.textContent = parts.join(" ");
+  next.disabled = false;
+}
+
+function showScore() {
+  header.textContent = "Finished";
+  quiz.replaceChildren(el("p", "You got " + correctCount + " of " + questions.length + "."));
+}
+
+fetch(questionsUrl).then((response) => response.json()).then((payload) => {
+  questions = payload.questions || [];
+  if (!questions.length) {
+    header.textContent = "This practice test has no questions.";
+    return;
+  }
+  render();
+}).catch(() => {
+  header.textContent = "This practice test could not be opened.";
+});
+</script>"""
     )
     return page(title, body)
 
@@ -379,6 +549,10 @@ class LibraryHandler(BaseHTTPRequestHandler):
             if path == "/writing":
                 self._send_html(writing_page(root, error))
                 return
+            practice_match = _PRACTICE_PATH.match(path)
+            if practice_match:
+                self._practice_get(root, practice_match)
+                return
             class_match = _CLASS_PATH.match(path)
             if class_match:
                 self._send_html(class_page(root, class_match.group(1), error))
@@ -416,6 +590,10 @@ class LibraryHandler(BaseHTTPRequestHandler):
         if path == "/writing":
             self._add_writing(root, body)
             return
+        practice_match = _PRACTICE_PATH.match(path)
+        if practice_match and practice_match.group(5) == "grade":
+            self._grade_practice(root, practice_match, body)
+            return
         self._send_html(page("Not found", "<p>That page is not in the classes folder.</p>"), 404)
 
     def _create_assignment(self, root: Path, class_folder: str, body: bytes) -> None:
@@ -439,6 +617,64 @@ class LibraryHandler(BaseHTTPRequestHandler):
             self._redirect(back + "?error=" + quote(exc.message))
             return
         self._redirect(back)
+
+    def _practice_get(self, root: Path, match: re.Match[str]) -> None:
+        class_folder, test_folder = match.group(1), match.group(2)
+        review = match.group(3) == "/review"
+        action = match.group(5)
+        try:
+            if action == "grade":
+                self._send_json({"ok": False, "error": "Submit an answer to check it."}, 405)
+                return
+            if action == "questions":
+                _title, questions = load_questions(root, class_folder, test_folder, review=review)
+                self._send_json({"questions": public_questions(questions)})
+                return
+            self._send_html(quiz_page(root, class_folder, test_folder, review=review))
+        except AssistantError as exc:
+            if action == "questions":
+                self._send_json({"ok": False, "error": exc.message}, 404)
+                return
+            back = "/class/" + quote(class_folder)
+            self._send_html(
+                page("Practice test", f"<p class='error'>{html.escape(exc.message)}</p><p><a href='{back}'>Back to class</a></p>"),
+                404,
+            )
+
+    def _grade_practice(self, root: Path, match: re.Match[str], body: bytes) -> None:
+        class_folder, test_folder = match.group(1), match.group(2)
+        review = match.group(3) == "/review"
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            self._send_json({"ok": False, "error": "That answer could not be checked."}, 400)
+            return
+        if not isinstance(payload, dict):
+            self._send_json({"ok": False, "error": "That answer could not be checked."}, 400)
+            return
+        selected = payload.get("selected") or []
+        if not isinstance(selected, list) or not selected:
+            self._send_json({"ok": False, "error": "Choose an answer."}, 400)
+            return
+        try:
+            _title, questions = load_questions(root, class_folder, test_folder, review=review)
+            question = question_by_id(questions, str(payload.get("id", "")))
+            if payload.get("review") and not review:
+                mark_for_review(root, class_folder, test_folder, question)
+        except AssistantError as exc:
+            self._send_json({"ok": False, "error": exc.message}, 404)
+            return
+        correct = grade_answer(question, [str(item) for item in selected])
+        lookup = dict(question.choices)
+        answer_text = ", ".join(f"{letter}) {lookup.get(letter, letter)}" for letter in sorted(question.answers))
+        self._send_json(
+            {
+                "ok": True,
+                "correct": correct,
+                "explanation": question.explanation,
+                "answer_text": answer_text,
+            }
+        )
 
     def _add_writing(self, root: Path, body: bytes) -> None:
         fields = parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
@@ -474,6 +710,9 @@ class LibraryHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", f'{disposition}; filename="{filename}"')
         self.end_headers()
         self.wfile.write(data)
+
+    def _send_json(self, payload: dict[str, object], status: int = 200) -> None:
+        self._send(status, "application/json; charset=utf-8", json.dumps(payload).encode("utf-8"))
 
     def _send(self, status: int, content_type: str, data: bytes) -> None:
         self.send_response(status)

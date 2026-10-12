@@ -24,6 +24,9 @@ SYSTEM_INSTRUCTION = (
     "The user adds every piece. You cannot add to or edit that file. "
     "When the user asks you to write like them, read My writing and match their voice. "
     "Do not imitate their writing unless they ask. "
+    "When the user asks for a practice test, create one for that class with create_practice_test. "
+    "A class can have several tests, such as Unit 1, Unit 2, and a midterm. "
+    "Use only facts from that class's notes, sources, or the screen. "
     "Do not invent details that are not on the screen or in the class files. "
     "Keep the reply concise, and name any file or folder you create, change, or delete."
 )

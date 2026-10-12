@@ -1,8 +1,8 @@
 # macOS AI Screen Assistant
 
-A menu-bar assistant for macOS. Press **Control + Option + ]** and it captures the display you are using, sends that one screenshot to the OpenAI Responses API, and shows the answer in a small floating window at the upper-right of that display.
+A menu-bar assistant for macOS. Press **Control + Option + ]** to open a small floating window at the upper-right of the display you are using. **Add screenshot** captures that display and sends the image to the OpenAI Responses API.
 
-It does not watch the screen in the background. A capture happens only when you press the shortcut or choose **Ask about this screen** from the **AI** menu.
+It does not watch the screen in the background. A capture happens only when you press **Add screenshot**.
 
 ## How it is put together
 
@@ -10,13 +10,14 @@ Hammerspoon listens for the shortcut and draws the popup. A Python virtualenv in
 
 ```
 Control-Option-]
-  → Hammerspoon captures the display under the pointer
+  → floating panel on the display under the pointer
+Add screenshot
+  → Hammerspoon captures that display
   → scripts/run.sh  (background task, the popup stays responsive)
   → OpenAI Responses API
-  → floating panel on the same display
 ```
 
-Follow-up questions stay in that popup and reuse the same response, so the screenshot is not sent again. Closing the panel or taking a new screenshot starts a new session.
+Follow-up questions stay in that popup and reuse the same response, so the screenshot is not sent again. Closing the panel ends the session.
 
 ## Install on this Mac or another Mac
 
@@ -76,15 +77,15 @@ The panel uses a non-activating window so it can appear over Safari, Chrome, Pre
 2. An **AI** item appears in the menu bar.
 3. Press **Control + Option + ]**.
 
-The popup shows a spinner, then the answer. Text in the answer can be selected. **Copy** puts the conversation on the clipboard. Drag the title bar to move the panel. **Close** or **Escape** dismisses it.
+The window opens without taking a screenshot. Press **Add screenshot** when you want Jarvis to look at the display. The popup then shows a spinner, then the answer. Text in the answer can be selected. **Copy** puts the conversation on the clipboard. Drag the title bar to move the panel. **Close** or **Escape** dismisses it.
 
 Pressing the shortcut again while a request is running does not start a second request.
 
-Type a follow-up in the box at the bottom and press Return. **Another screenshot** captures the display again and keeps this conversation, so the next page or question stays in the same context. Pressing the shortcut starts a fresh answer. Closing the panel ends it too.
+Type a follow-up in the box at the bottom and press Return. **Add screenshot** captures the display again and keeps this conversation, so the next page or question stays in the same context. Text in the box is sent with that screenshot. Closing the panel ends the session.
 
 ### Quit or disable
 
-- Menu bar **AI → Disable shortcut** leaves the assistant loaded but ignores the hotkey. **Enable shortcut** turns it back on. The menu item **Ask about this screen** still works while the hotkey is disabled.
+- Menu bar **AI → Disable shortcut** leaves the assistant loaded but ignores the hotkey. **Enable shortcut** turns it back on. The menu item **Open Jarvis** still works while the hotkey is disabled.
 - **AI → Quit Screen Assistant** unloads the hotkey, menu item, and popup. Other Hammerspoon config keeps running.
 - From a terminal: `scripts/quit.sh`
 - To start it again: `scripts/launch.sh`
@@ -131,6 +132,8 @@ On a quiz or assignment, Jarvis answers the question and uses the matching class
 
 **My writing** on that page is not a class. Add your own writing there. When you ask Jarvis to write like you, it reads that file and matches your voice. Jarvis cannot add to it.
 
+Open a class to see its **Practice tests**. Ask Jarvis for one, and name it, for example Unit 1 or Midterm. A class can have several. Each test uses multiple choice, true/false, and select-all questions. Jarvis writes them from that class's notes and sources.
+
 Those file contents are sent to OpenAI only as part of a request you start, the same as the screenshot. Set `classes_enabled` to `false` to turn this off.
 
 The classes folder must be a dedicated directory. Your home folder, Desktop, Documents, or Downloads cannot be used as `classes_dir`.
@@ -171,5 +174,7 @@ The popup, global shortcut, Screen Recording prompt, and login item were not exe
 - The panel stays at the upper-right of the display under the pointer
 - A second press during loading does not start another request
 - A follow-up refers to the same screen
-- Closing the panel and pressing the shortcut starts a fresh answer
+- The shortcut opens the panel and does not capture the screen
+- **Add screenshot** captures the display under the pointer
+- Closing the panel ends the session
 - `scripts/quit.sh` removes the AI menu until you reload Hammerspoon

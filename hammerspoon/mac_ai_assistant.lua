@@ -564,10 +564,6 @@ function M.captureAgain(note)
     callJS("flash", "A request is already running.")
     return
   end
-  if not state.responseId or state.responseId == "" then
-    callJS("showError", "Wait for an answer before adding another screenshot.")
-    return
-  end
   note = (note or ""):gsub("^%s+", ""):gsub("%s+$", "")
 
   callJS("clearQuestion")
@@ -575,6 +571,9 @@ function M.captureAgain(note)
   state.session = state.session + 1
   local session = state.session
   local previousId = state.responseId
+  if not previousId or previousId == "" then
+    previousId = nil
+  end
   state.screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
   callJS("setBusy", true)
 
@@ -588,25 +587,31 @@ function M.captureAgain(note)
       return
     end
     state.imagePath = path
-    local label = "Another screenshot"
+    local label = previousId and "Another screenshot" or "Screenshot"
     if note ~= "" then
-      label = "Another screenshot\n\n" .. note
+      label = label .. "\n\n" .. note
     end
     local args = {
       "analyze",
       "--image",
       path,
-      "--previous-id",
-      previousId,
       "--config",
       CONFIG_PATH,
     }
+    if previousId then
+      table.insert(args, "--previous-id")
+      table.insert(args, previousId)
+    end
     if note ~= "" then
       table.insert(args, "--text")
       table.insert(args, note)
     end
     local shown, showErr = pcall(function()
-      ensurePopup(state.screen)
+      if previousId then
+        ensurePopup(state.screen)
+      else
+        presentLoading(state.screen)
+      end
       callJS("addUser", label)
       runPython(session, args, path)
     end)
@@ -639,7 +644,7 @@ function M.followup(text)
     return
   end
   if not state.responseId or state.responseId == "" then
-    callJS("showError", "Take a screenshot before asking a follow-up.")
+    callJS("showError", "Add a screenshot before asking a follow-up.")
     return
   end
   state.busy = true
@@ -657,60 +662,18 @@ function M.followup(text)
   })
 end
 
-function M.trigger(force)
+function M.show(force)
   if not state.enabled and not force then
     return
   end
   if state.busy then
-    if state.webview then
-      callJS("flash", "A request is already running.")
+    if state.webview and state.webview:isVisible() then
+      state.webview:bringToFront(false)
     end
     return
   end
-
-  state.busy = true
-  state.responseId = nil
-  state.session = state.session + 1
-  local session = state.session
   state.screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
-
-  local function capture()
-    if session ~= state.session then
-      return
-    end
-    local path, err = captureScreen(state.screen)
-    if not path then
-      presentError(state.screen, err)
-      return
-    end
-    state.imagePath = path
-    local shown, showErr = pcall(function()
-      presentLoading(state.screen)
-      runPython(session, {
-        "analyze",
-        "--image",
-        path,
-        "--config",
-        CONFIG_PATH,
-      }, path)
-    end)
-    if not shown then
-      state.busy = false
-      deleteFile(path)
-      log.e("popup failed: " .. redact(showErr))
-      hs.notify.show("Screen Assistant", "", "The popup could not open. " .. redact(showErr))
-    end
-  end
-
-  if state.webview and state.webview:isVisible() then
-    state.webview:hide()
-    state.captureTimer = hs.timer.doAfter(0.15, function()
-      state.captureTimer = nil
-      capture()
-    end)
-  else
-    capture()
-  end
+  ensurePopup(state.screen)
 end
 
 local function shortcutLabel()
@@ -731,7 +694,7 @@ local function bindHotkey()
   local shortcut = state.config.shortcut
   local ok, hotkeyOrErr = pcall(function()
     return hs.hotkey.bind(shortcut.modifiers, shortcut.key, function()
-      M.trigger()
+      M.show()
     end)
   end)
   if not ok or not hotkeyOrErr then
@@ -753,9 +716,9 @@ local function menuItems()
   local enabledTitle = state.enabled and "Disable shortcut" or "Enable shortcut"
   return {
     {
-      title = "Ask about this screen  " .. shortcutLabel(),
+      title = "Open Jarvis  " .. shortcutLabel(),
       fn = function()
-        M.trigger(true)
+        M.show(true)
       end,
     },
     {

@@ -75,6 +75,14 @@ CONTINUE_IMAGE_PROMPT = (
 )
 
 
+def analyze_prompt(user_prompt: str, note: str = "") -> str:
+    """First-screenshot prompt, with any text the user typed in the popup."""
+    cleaned = note.strip()
+    if not cleaned:
+        return user_prompt
+    return cleaned + "\n\n" + user_prompt
+
+
 def continue_image_prompt(note: str = "") -> str:
     """Continue-screenshot prompt, with any text the user typed in the popup."""
     cleaned = note.strip()

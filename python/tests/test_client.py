@@ -7,6 +7,7 @@ from assistant.client import (
     build_analyze_request,
     build_connection_request,
     CONTINUE_IMAGE_PROMPT,
+    analyze_prompt,
     build_continue_image_request,
     continue_image_prompt,
     build_followup_request,
@@ -63,6 +64,12 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(content[1]["type"], "input_image")
         self.assertEqual(content[1]["detail"], "high")
         self.assertEqual(payload["tools"][0]["name"], "read_class_file")
+
+    def test_first_screenshot_prompt_includes_the_text_box(self) -> None:
+        self.assertEqual(analyze_prompt("Look at this screenshot."), "Look at this screenshot.")
+        prompt = analyze_prompt("Look at this screenshot.", "  Answer question 3  ")
+        self.assertTrue(prompt.startswith("Answer question 3\n\n"))
+        self.assertIn("Look at this screenshot.", prompt)
 
     def test_continue_prompt_includes_the_text_box(self) -> None:
         self.assertEqual(continue_image_prompt("  "), CONTINUE_IMAGE_PROMPT)

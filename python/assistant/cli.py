@@ -112,7 +112,7 @@ def analyze(
         payload = api.build_analyze_request(
             model=config["model"],
             instructions=instructions,
-            prompt=config["user_prompt"],
+            prompt=api.analyze_prompt(config["user_prompt"], note),
             data_url=data_url,
             detail=config["image_detail"],
             max_output_tokens=output_tokens,
