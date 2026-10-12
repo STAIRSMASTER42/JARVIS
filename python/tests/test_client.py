@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from assistant.client import (
     build_analyze_request,
     build_connection_request,
+    CONTINUE_IMAGE_PROMPT,
     build_continue_image_request,
+    continue_image_prompt,
     build_followup_request,
     complete,
     complete_with_tools,
@@ -61,6 +63,12 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(content[1]["type"], "input_image")
         self.assertEqual(content[1]["detail"], "high")
         self.assertEqual(payload["tools"][0]["name"], "read_class_file")
+
+    def test_continue_prompt_includes_the_text_box(self) -> None:
+        self.assertEqual(continue_image_prompt("  "), CONTINUE_IMAGE_PROMPT)
+        prompt = continue_image_prompt("  Answer question 3  ")
+        self.assertTrue(prompt.startswith("Answer question 3\n\n"))
+        self.assertIn(CONTINUE_IMAGE_PROMPT, prompt)
 
     def test_followup_keeps_previous_response(self) -> None:
         payload = build_followup_request(

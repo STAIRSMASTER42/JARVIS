@@ -16,6 +16,7 @@ from assistant.classes import (
     with_class_context,
 )
 from assistant.library import serve_library
+from assistant.writing import WRITING_GUIDANCE, read_my_writing, writing_summary, writing_tools
 from assistant.config import load_config
 from assistant.errors import AssistantError, sanitize
 from assistant.images import prepare_image
@@ -51,6 +52,22 @@ def _class_workspace(config: dict[str, Any]) -> ClassWorkspace | None:
     return ClassWorkspace(resolved_classes_dir(config))
 
 
+def _local_context(config: dict[str, Any], workspace: ClassWorkspace | None) -> tuple[str, list[dict[str, Any]] | None, Any]:
+    instructions = config["system_instruction"]
+    if workspace is None:
+        return instructions, None, None
+    instructions = with_class_context(instructions, catalog(workspace.root))
+    instructions = instructions.rstrip() + "\n\n" + WRITING_GUIDANCE + "\n\n" + writing_summary(workspace.root) + "\n"
+    tools = class_tools() + writing_tools()
+
+    def execute(name: str, arguments: str) -> str:
+        if name == "read_my_writing":
+            return read_my_writing(workspace.root)
+        return workspace.dispatch(name, arguments)
+
+    return instructions, tools, execute
+
+
 def _finish(text: str, response_id: str, workspace: ClassWorkspace | None) -> dict[str, Any]:
     if workspace is not None:
         text = append_change_note(text, workspace.changed)
@@ -62,6 +79,7 @@ def analyze(
     config_path: Path | None,
     keep_image: bool,
     previous_id: str | None = None,
+    note: str = "",
 ) -> dict[str, Any]:
     config = load_config(config_path)
     data, mime = prepare_image(
@@ -71,12 +89,9 @@ def analyze(
         keep=keep_image,
     )
     workspace = _class_workspace(config)
-    instructions = config["system_instruction"]
-    tools = None
+    instructions, tools, execute = _local_context(config, workspace)
     output_tokens = config["max_output_tokens"]
     if workspace is not None:
-        instructions = with_class_context(instructions, catalog(workspace.root))
-        tools = class_tools()
         output_tokens = max(output_tokens, CLASS_OUTPUT_TOKENS)
     api_key = resolve_api_key()
     openai_client = api.make_client(api_key, config["timeout_seconds"])
@@ -87,7 +102,7 @@ def analyze(
             model=config["model"],
             instructions=instructions,
             previous_response_id=continued,
-            prompt=api.CONTINUE_IMAGE_PROMPT,
+            prompt=api.continue_image_prompt(note),
             data_url=data_url,
             detail=config["image_detail"],
             max_output_tokens=output_tokens,
@@ -106,7 +121,7 @@ def analyze(
     if workspace is None:
         text, response_id = api.complete(openai_client, payload)
     else:
-        text, response_id = api.complete_with_tools(openai_client, payload, workspace.dispatch)
+        text, response_id = api.complete_with_tools(openai_client, payload, execute)
     return _finish(text, response_id, workspace)
 
 
@@ -120,12 +135,9 @@ def followup(previous_id: str, text: str, config_path: Path | None) -> dict[str,
         raise AssistantError("bad_request", "Enter a follow-up question first.")
     config = load_config(config_path)
     workspace = _class_workspace(config)
-    instructions = config["system_instruction"]
-    tools = None
+    instructions, tools, execute = _local_context(config, workspace)
     output_tokens = config["max_output_tokens"]
     if workspace is not None:
-        instructions = with_class_context(instructions, catalog(workspace.root))
-        tools = class_tools()
         output_tokens = max(output_tokens, CLASS_OUTPUT_TOKENS)
     api_key = resolve_api_key()
     openai_client = api.make_client(api_key, config["timeout_seconds"])
@@ -140,7 +152,7 @@ def followup(previous_id: str, text: str, config_path: Path | None) -> dict[str,
     if workspace is None:
         answer, response_id = api.complete(openai_client, payload)
     else:
-        answer, response_id = api.complete_with_tools(openai_client, payload, workspace.dispatch)
+        answer, response_id = api.complete_with_tools(openai_client, payload, execute)
     return _finish(answer, response_id, workspace)
 
 
@@ -174,6 +186,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--previous-id",
         default="",
         help="Continue this response with another screenshot",
+    )
+    analyze_parser.add_argument(
+        "--text",
+        default="",
+        help="Text from the popup to include with another screenshot",
     )
     analyze_parser.add_argument("--config", help="Path to config.json")
     analyze_parser.add_argument(
@@ -245,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
                 config_path,
                 args.keep_image,
                 args.previous_id,
+                args.text,
             )
         elif args.command == "followup":
             payload = followup(args.previous_id, args.text, config_path)

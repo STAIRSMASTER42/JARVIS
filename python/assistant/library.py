@@ -23,6 +23,7 @@ from assistant.classes import (
     source_filename,
 )
 from assistant.errors import AssistantError
+from assistant.writing import add_writing, piece_count, writing_file
 
 LIBRARY_PORT = 8766
 _CLASS_PATH = re.compile(r"^/class/([^/]+)$")
@@ -106,6 +107,17 @@ button, .button {
   padding: 8px 12px;
   text-decoration: none;
 }
+textarea {
+  width: 100%;
+  min-height: 180px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: inherit;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+form.stack { flex-direction: column; align-items: stretch; }
 .error { color: var(--danger); padding: 12px 14px; }
 .file { margin: 0 0 8px; }
 """
@@ -185,8 +197,46 @@ def classes_page(root: Path, error: str = "") -> str:
                 f"<span>{label}</span></a>"
             )
         cards = "\n".join(items)
-    body = _banner(error) + "<h1>Classes</h1><p class='sub'>Choose a class to see its assignments.</p>" + cards
+    body = (
+        _banner(error)
+        + "<h1>Classes</h1><p class='sub'>Choose a class to see its assignments.</p>"
+        + cards
+        + "<h2 class='section'>Not a class</h2>"
+        + _writing_card(root)
+    )
     return page("Classes", body)
+
+
+def _writing_card(classes_root: Path) -> str:
+    count = piece_count(writing_file(classes_root))
+    label = "No writing yet" if count == 0 else ("1 piece" if count == 1 else f"{count} pieces")
+    return (
+        '<a class="card" href="/writing"><strong>My writing</strong>'
+        f"<span>{label}. Your writing, for when you want Jarvis to write like you.</span></a>"
+    )
+
+
+def writing_page(classes_root: Path, error: str = "") -> str:
+    path = writing_file(classes_root)
+    text = ""
+    if path.is_file() and not path.is_symlink():
+        text = path.read_text(encoding="utf-8", errors="replace")
+    if piece_count(path) == 0:
+        shown = "<p class='muted'>No writing yet. Add a piece below.</p>"
+    else:
+        shown = f"<div class='note'>{render_note(text)}</div>"
+    body = (
+        f"{_banner(error)}<h1>My writing</h1>"
+        "<p class='sub'><a href='/'>All classes</a></p>"
+        "<p class='sub'>This is not a class. Add your own writing here. "
+        "When you ask Jarvis to write like you, it reads this file. Jarvis cannot add to it.</p>"
+        f"{shown}"
+        "<form class='stack' method='post' action='/writing'>"
+        "<input type='text' name='title' required placeholder='Title'>"
+        "<textarea name='text' required placeholder='Paste your writing'></textarea>"
+        "<button type='submit'>Add writing</button></form>"
+    )
+    return page("My writing", body)
 
 
 def class_page(root: Path, class_folder: str, error: str = "") -> str:
@@ -326,6 +376,9 @@ class LibraryHandler(BaseHTTPRequestHandler):
             if path == "/":
                 self._send_html(classes_page(root, error))
                 return
+            if path == "/writing":
+                self._send_html(writing_page(root, error))
+                return
             class_match = _CLASS_PATH.match(path)
             if class_match:
                 self._send_html(class_page(root, class_match.group(1), error))
@@ -360,6 +413,9 @@ class LibraryHandler(BaseHTTPRequestHandler):
         if source_post:
             self._upload_source(root, source_post.group(1), source_post.group(2), content_type, body)
             return
+        if path == "/writing":
+            self._add_writing(root, body)
+            return
         self._send_html(page("Not found", "<p>That page is not in the classes folder.</p>"), 404)
 
     def _create_assignment(self, root: Path, class_folder: str, body: bytes) -> None:
@@ -383,6 +439,17 @@ class LibraryHandler(BaseHTTPRequestHandler):
             self._redirect(back + "?error=" + quote(exc.message))
             return
         self._redirect(back)
+
+    def _add_writing(self, root: Path, body: bytes) -> None:
+        fields = parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
+        title = fields.get("title", [""])[0]
+        text = fields.get("text", [""])[0]
+        try:
+            add_writing(root, title, text)
+        except AssistantError as exc:
+            self._redirect("/writing?error=" + quote(exc.message))
+            return
+        self._redirect("/writing")
 
     def _redirect(self, location: str) -> None:
         self.send_response(303)

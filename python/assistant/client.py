@@ -75,6 +75,14 @@ CONTINUE_IMAGE_PROMPT = (
 )
 
 
+def continue_image_prompt(note: str = "") -> str:
+    """Continue-screenshot prompt, with any text the user typed in the popup."""
+    cleaned = note.strip()
+    if not cleaned:
+        return CONTINUE_IMAGE_PROMPT
+    return cleaned + "\n\n" + CONTINUE_IMAGE_PROMPT
+
+
 def build_continue_image_request(
     *,
     model: str,

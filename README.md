@@ -123,11 +123,13 @@ scripts/run.sh classes add --title "Biology 101" --term "Fall 2026"
 scripts/run.sh classes list
 ```
 
-You can also ask in the popup, for example: "Add my Biology 101 class" or "Save this as a note for Biology."
+You can also ask in the popup, for example: "Add my Biology 101 class" or "Save this as a note for Biology." Ask Jarvis to delete a class or assignment when you want that folder removed. It deletes the folder and the files inside it, and it cannot delete anything outside the classes folder.
 
 On a quiz or assignment, Jarvis answers the question and uses the matching class files, assignment notes, and source documents as context. On a textbook screenshot, it saves notes into that class or assignment. If it cannot tell which class the screen belongs to, it asks. After it changes a file, the reply names the file.
 
 **Classes** in the popup opens a page in your browser. Pick a class, then an assignment, to read the notes Jarvis saved. Use **Add file** on an assignment to attach any source. Jarvis can read text, PDF, and Word files, and it can see the names of other files you add.
+
+**My writing** on that page is not a class. Add your own writing there. When you ask Jarvis to write like you, it reads that file and matches your voice. Jarvis cannot add to it.
 
 Those file contents are sent to OpenAI only as part of a request you start, the same as the screenshot. Set `classes_enabled` to `false` to turn this off.
 

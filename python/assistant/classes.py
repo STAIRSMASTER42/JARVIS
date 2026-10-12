@@ -22,11 +22,14 @@ CLASS_GUIDANCE = (
     "Read the relevant notes and sources before you answer a question or complete an assignment. "
     "Create an assignment folder when the user names an assignment or when a screenshot is clearly about one. "
     "Write textbook notes that belong to an assignment into that assignment's notes.md, and other textbook notes into the class notes.md. "
-    "You can create and edit note files. The user adds source files of any type from the Classes window. "
+    "You can create and edit note files, and you can delete a class or assignment folder when the user asks you to remove it. "
+    "Deleting a folder removes the notes and source files inside it. Do not delete a folder unless the user asked. "
+    "The user adds source files of any type from the Classes window. "
+    "My writing is not a class. Only the user adds to that file. Read it when they ask you to write like them. "
     "You can read text, PDF, and Word sources. For other files, use the file name and say when the contents could not be extracted. "
     "If you cannot tell which class or assignment a screen belongs to, ask instead of guessing. "
     "Do not invent course details, due dates, or notes that are not in the files or on the screen. "
-    "After you create or edit a file, name the file path in your reply."
+    "After you create, edit, or delete a file or folder, name that path in your reply."
 )
 
 README_TEXT = """# Classes
@@ -389,6 +392,22 @@ def class_tools() -> list[dict[str, Any]]:
             ),
         ),
         _tool(
+            "delete_folder",
+            "Delete a class folder or an assignment folder, including its notes and source files. Use this only when the user explicitly asks to remove that folder.",
+            _object(
+                {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Folder path relative to the classes folder, such as biology-101 "
+                            "or biology-101/assignments/essay."
+                        ),
+                    }
+                },
+                ["path"],
+            ),
+        ),
+        _tool(
             "search_class_files",
             "Find a phrase across class files.",
             _object(
@@ -450,6 +469,8 @@ class ClassWorkspace:
                     str(payload.get("old_text", "")),
                     str(payload.get("new_text", "")),
                 )
+            if name == "delete_folder":
+                return self._delete_folder(str(payload.get("path", "")))
             if name == "search_class_files":
                 return self._search(str(payload.get("query", "")))
             return "That class file tool is not available."
@@ -492,6 +513,23 @@ class ClassWorkspace:
         stored = _relative(self.root, path)
         self._mark(stored)
         return f"Updated {stored}."
+
+    def _delete_folder(self, relative: str) -> str:
+        path = resolve_class_file(self.root, relative)
+        root_resolved = self.root.resolve()
+        if path.is_symlink():
+            raise AssistantError("class_file", "That path is not allowed in the classes folder.")
+        if not path.exists():
+            return "That folder does not exist."
+        if not path.is_dir():
+            raise AssistantError("class_file", "That path is not a folder.")
+        resolved = path.resolve()
+        if resolved == root_resolved or root_resolved not in resolved.parents:
+            raise AssistantError("class_file", "That path is outside the classes folder.")
+        stored = _relative(self.root, path)
+        _remove_tree(path)
+        self._mark(stored)
+        return f"Deleted {stored}."
 
     def _search(self, query: str) -> str:
         needle = query.strip()
@@ -646,6 +684,16 @@ def _word_text(path: Path) -> str:
         return "This Word document could not be read."
     text = (completed.stdout or "").strip()
     return text or "This Word document has no extractable text."
+
+
+def _remove_tree(path: Path) -> None:
+    """Delete a real directory. Symlinks are removed without following them."""
+    for child in list(path.iterdir()):
+        if child.is_symlink() or not child.is_dir():
+            child.unlink()
+            continue
+        _remove_tree(child)
+    path.rmdir()
 
 
 def _readable_files(root: Path) -> list[Path]:

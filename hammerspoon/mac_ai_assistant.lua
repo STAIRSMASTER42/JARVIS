@@ -253,7 +253,7 @@ local function onWebMessage(message)
   elseif body.action == "followup" then
     M.followup(tostring(body.text or ""))
   elseif body.action == "again" then
-    M.captureAgain()
+    M.captureAgain(tostring(body.text or ""))
   elseif body.action == "library" then
     M.openLibrary()
   end
@@ -559,7 +559,7 @@ function M.openLibrary()
   poll()
 end
 
-function M.captureAgain()
+function M.captureAgain(note)
   if state.busy then
     callJS("flash", "A request is already running.")
     return
@@ -568,7 +568,9 @@ function M.captureAgain()
     callJS("showError", "Wait for an answer before adding another screenshot.")
     return
   end
+  note = (note or ""):gsub("^%s+", ""):gsub("%s+$", "")
 
+  callJS("clearQuestion")
   state.busy = true
   state.session = state.session + 1
   local session = state.session
@@ -586,18 +588,27 @@ function M.captureAgain()
       return
     end
     state.imagePath = path
+    local label = "Another screenshot"
+    if note ~= "" then
+      label = "Another screenshot\n\n" .. note
+    end
+    local args = {
+      "analyze",
+      "--image",
+      path,
+      "--previous-id",
+      previousId,
+      "--config",
+      CONFIG_PATH,
+    }
+    if note ~= "" then
+      table.insert(args, "--text")
+      table.insert(args, note)
+    end
     local shown, showErr = pcall(function()
       ensurePopup(state.screen)
-      callJS("addUser", "Another screenshot")
-      runPython(session, {
-        "analyze",
-        "--image",
-        path,
-        "--previous-id",
-        previousId,
-        "--config",
-        CONFIG_PATH,
-      }, path)
+      callJS("addUser", label)
+      runPython(session, args, path)
     end)
     if not shown then
       state.busy = false

@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -78,6 +79,37 @@ class LibraryPageTests(unittest.TestCase):
             status, missing = _request(base + "/class/not-a-class")
             self.assertEqual(status, 404)
             self.assertIn("not in the classes folder", missing)
+
+    def test_my_writing_is_added_by_the_user_and_is_not_a_class(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            classes = workspace / "classes"
+            classes.mkdir()
+            server = start_library(classes)
+            self.addCleanup(server.shutdown)
+            self.addCleanup(server.server_close)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            status, home = _request(base + "/")
+            self.assertEqual(status, 200)
+            self.assertIn("My writing", home)
+            self.assertIn("Not a class", home)
+
+            status, empty = _request(base + "/writing")
+            self.assertEqual(status, 200)
+            self.assertIn("Jarvis cannot add to it.", empty)
+            self.assertIn("Paste your writing", empty)
+
+            payload = urllib.parse.urlencode(
+                {"title": "The lake", "text": "The water was flat and bright."}
+            ).encode()
+            status, page = _request(base + "/writing", payload, "application/x-www-form-urlencoded")
+            self.assertEqual(status, 200)
+            self.assertIn("The water was flat and bright.", page)
+            saved = workspace / "writing" / "my-writing.md"
+            self.assertTrue(saved.is_file())
+            self.assertFalse((classes / "my-writing.md").exists())
+            self.assertNotIn("my-writing.md", _request(base + "/")[1])
 
 
 if __name__ == "__main__":

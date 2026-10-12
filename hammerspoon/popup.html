@@ -307,6 +307,9 @@
         addBubble("user", text || "");
         setBusy(true);
       },
+      clearQuestion() {
+        question.value = "";
+      },
       flash(text) {
         status.textContent = text || "";
       }
@@ -322,7 +325,7 @@
 
     again.addEventListener("click", () => {
       if (again.disabled) return;
-      post({ action: "again" });
+      post({ action: "again", text: question.value.trim() });
     });
 
     classes.addEventListener("click", () => {

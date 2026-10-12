@@ -143,6 +143,48 @@ class ClassFileTests(unittest.TestCase):
             path = resolve_class_file(root, "biology-101/assignments/essay/sources/reading.pdf")
             self.assertTrue(str(path).endswith("biology-101/assignments/essay/sources/reading.pdf"))
 
+    def test_delete_folder_removes_only_the_named_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            add_course(root, "History")
+            add_assignment(root, "history", "Paper")
+            outside = root.with_name(root.name + "-outside")
+            outside.mkdir()
+            secret = outside / "secret.txt"
+            secret.write_text("keep", encoding="utf-8")
+            sources = root / "history" / "assignments" / "paper" / "sources"
+            (sources / "escape").symlink_to(outside, target_is_directory=True)
+            (root / "history" / "linked").symlink_to(outside, target_is_directory=True)
+
+            workspace = ClassWorkspace(root)
+            refused = workspace.dispatch("delete_folder", {"path": "history/linked"})
+            self.assertIn("not allowed", refused)
+            self.assertTrue(secret.is_file())
+
+            deleted = workspace.dispatch("delete_folder", {"path": "history/assignments/paper"})
+            self.assertEqual(deleted, "Deleted history/assignments/paper.")
+            self.assertFalse((root / "history" / "assignments" / "paper").exists())
+            self.assertTrue((root / "history" / "notes.md").is_file())
+            self.assertTrue(secret.is_file())
+            self.assertEqual(secret.read_text(encoding="utf-8"), "keep")
+
+            removed = workspace.dispatch("delete_folder", {"path": "history"})
+            self.assertEqual(removed, "Deleted history.")
+            self.assertFalse((root / "history").exists())
+            self.assertTrue((root / "README.md").is_file())
+            self.assertTrue(secret.is_file())
+
+            missing = workspace.dispatch("delete_folder", {"path": "history"})
+            self.assertEqual(missing, "That folder does not exist.")
+            file_path = workspace.dispatch("delete_folder", {"path": "README.md"})
+            self.assertIn("not a folder", file_path)
+            self.assertTrue((root / "README.md").is_file())
+            escaped = workspace.dispatch("delete_folder", {"path": "../" + outside.name})
+            self.assertIn("not allowed", escaped)
+            self.assertTrue(secret.is_file())
+            secret.unlink()
+            outside.rmdir()
+
     def test_any_file_can_be_attached_inside_the_assignment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
