@@ -233,7 +233,7 @@ def complete_with_tools(
     payload: dict[str, Any],
     execute: Callable[[str, str], str],
     *,
-    max_rounds: int = 5,
+    max_rounds: int = 50,
 ) -> tuple[str, str]:
     """Call the model, run class-file tools, and repeat until it returns text."""
     response = create_response(client, payload)
