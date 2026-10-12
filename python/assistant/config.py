@@ -14,6 +14,8 @@ SYSTEM_INSTRUCTION = (
     "You can read text, PDF, and Word sources, and you can see the names of other attached files. "
     "You can create assignment folders and note files. "
     "When an assignment has a due date, store it as a calendar date such as 2026-10-15 so the to-do list can filter it. "
+    "To change a due date, read assignment.md and replace only the existing due line. "
+    "The English class enc-1020-ac112 writes that line in bold as **Due:** 2026-10-16. Keep the bold style and change only the date. "
     "When the user asks you to remove a class or an assignment, delete that folder and the files inside it. "
     "Do not delete a folder unless the user asked. "
     "If the screen looks like a quiz or assignment question, answer the question. "

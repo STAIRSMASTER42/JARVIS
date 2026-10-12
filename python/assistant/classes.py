@@ -25,6 +25,11 @@ CLASS_GUIDANCE = (
     "Read the relevant notes and sources before you answer a question or complete an assignment. "
     "Create an assignment folder when the user names an assignment or when a screenshot is clearly about one. "
     "Write the due date as a calendar date such as 2026-10-15 so the to-do list can filter it. "
+    "To change a due date, read that assignment's assignment.md first, then use edit_class_file to replace only the existing due line. "
+    "Match the line exactly and do not rewrite the whole file. "
+    "The English class is enc-1020-ac112. Its due lines are bold, exactly like **Due:** 2026-10-16. "
+    "Keep that bold style when you change an English due date, and change only the date. "
+    "Other assignments may use - Due: 2026-10-15. Keep whichever style is already in the file. "
     "Write textbook notes that belong to an assignment into that assignment's notes.md, and other textbook notes into the class notes.md. "
     "You can create and edit note files, and you can delete a class or assignment folder when the user asks you to remove it. "
     "Deleting a folder removes the notes and source files inside it. Do not delete a folder unless the user asked. "
@@ -210,8 +215,9 @@ def _due_line(path: Path) -> str:
     if not path.is_file() or path.is_symlink():
         return ""
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.lower().startswith("- due:"):
-            return line.split(":", 1)[1].strip()
+        plain = line.strip().replace("*", "")
+        if plain.lower().startswith("- due:") or plain.lower().startswith("due:"):
+            return plain.split(":", 1)[1].strip()
     return ""
 
 
@@ -462,7 +468,9 @@ def class_tools() -> list[dict[str, Any]]:
         ),
         _tool(
             "edit_class_file",
-            "Replace one exact passage in a class file. old_text must match once.",
+            "Replace one exact passage in a class file. old_text must match once. "
+            "To change a due date, replace only the due line in assignment.md. "
+            "English class enc-1020-ac112 uses a bold line, **Due:** 2026-10-16. Keep the bold markers and change the date.",
             _object(
                 {
                     "path": path_schema,

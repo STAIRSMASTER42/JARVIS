@@ -56,6 +56,20 @@ class TodoTests(unittest.TestCase):
             self.assertIn('href="/todo?days=90"', page)
             self.assertIn("Overdue", page)
 
+    def test_bold_english_due_line_is_read(self) -> None:
+        today = date(2026, 10, 11)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            add_course(root, "English")
+            folder = add_assignment(root, "english", "Workshop 1", due="unknown")
+            (folder / "assignment.md").write_text(
+                "# Workshop 1: Everyday Arguments\n\n**Due:** 2026-10-13\n\n## Description\nPractice arguments.\n",
+                encoding="utf-8",
+            )
+            items = collect_todos(root, today)
+            self.assertEqual(items[0].due, date(2026, 10, 13))
+            self.assertEqual(items[0].due_text, "2026-10-13")
+
 
 if __name__ == "__main__":
     unittest.main()

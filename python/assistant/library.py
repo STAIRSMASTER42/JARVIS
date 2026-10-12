@@ -18,6 +18,7 @@ from assistant.classes import (
     _assignment_dir,
     _course_dir,
     add_assignment,
+    _due_line,
     course_title,
     ensure_workspace,
     list_assignments,
@@ -564,10 +565,7 @@ def _due_label(due: str) -> str:
 
 
 def _due_from_file(path: Path) -> str:
-    for line in _read_text(path).splitlines():
-        if line.lower().startswith("- due:"):
-            return line.split(":", 1)[1].strip()
-    return ""
+    return _due_line(path)
 
 
 def _heading_file(path: Path, fallback: str) -> str:
