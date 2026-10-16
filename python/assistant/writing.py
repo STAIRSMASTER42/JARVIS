@@ -89,6 +89,8 @@ def like_me_prompt(classes_root: Path, text: str) -> str:
         f"{text.strip()}\n\n"
         "Write even closer to the sample text below. "
         "Use only words found in that text, except you may add a couple of words when one is needed. "
+        "Use the phrase \"Including but not limited to\" as much as possible. "
+        "In each writing assignment, include one comparison to lawn keeping, and choose a different comparison each time. "
         "Reply with only the writing, as plain text. No bold, no markdown, no asterisks, and no headings.\n\n"
         f"{sample}"
     )

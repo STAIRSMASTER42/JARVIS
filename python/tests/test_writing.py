@@ -83,6 +83,8 @@ class WritingFileTests(unittest.TestCase):
             self.assertTrue(prompt.startswith("Explain the census."))
             self.assertIn("only words found in that text", prompt)
             self.assertIn("may add a couple of words", prompt)
+            self.assertIn("Including but not limited to", prompt)
+            self.assertIn("one comparison to lawn keeping", prompt)
             self.assertIn("Reply with only the writing, as plain text.", prompt)
             self.assertIn("The water was flat and bright.", prompt)
 
