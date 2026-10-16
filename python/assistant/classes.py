@@ -30,6 +30,9 @@ CLASS_GUIDANCE = (
     "The English class is enc-1020-ac112. Its due lines are bold, exactly like **Due:** 2026-10-16. "
     "Keep that bold style when you change an English due date, and change only the date. "
     "Other assignments may use - Due: 2026-10-15. Keep whichever style is already in the file. "
+    "When the user says an assignment is done, use mark_assignment_done. "
+    "That writes - Status: done in assignment.md and removes the assignment from the to-do list. "
+    "Do not rewrite assignment.md to mark it done. Mark it not done only when the user says it is not finished. "
     "Write textbook notes that belong to an assignment into that assignment's notes.md, and other textbook notes into the class notes.md. "
     "You can create and edit note files, and you can delete a class or assignment folder when the user asks you to remove it. "
     "Deleting a folder removes the notes and source files inside it. Do not delete a folder unless the user asked. "
@@ -211,6 +214,52 @@ def _heading(path: Path, fallback: str) -> str:
     return fallback
 
 
+def _is_status_line(line: str) -> bool:
+    plain = line.strip().replace("*", "").lower()
+    return plain.startswith("- status:") or plain.startswith("status:")
+
+
+def assignment_is_done(path: Path) -> bool:
+    if not path.is_file() or path.is_symlink():
+        return False
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not _is_status_line(line):
+            continue
+        value = line.strip().replace("*", "").split(":", 1)[1].strip().lower()
+        return value in {"done", "yes", "complete", "completed"}
+    return False
+
+
+def set_assignment_done(root: Path, class_folder: str, assignment_folder: str, done: bool) -> Path:
+    """Mark an assignment done, or remove that mark, without rewriting the rest of the file."""
+    folder = _assignment_dir(root, class_folder, assignment_folder)
+    path = folder / "assignment.md"
+    if path.is_symlink() or not path.is_file():
+        raise AssistantError("class_file", "That assignment does not have an assignment file.")
+    original = path.read_text(encoding="utf-8")
+    kept = [line for line in original.splitlines() if not _is_status_line(line)]
+    if done:
+        updated: list[str] = []
+        inserted = False
+        for line in kept:
+            updated.append(line)
+            plain = line.strip().replace("*", "").lower()
+            if not inserted and (plain.startswith("- due:") or plain.startswith("due:")):
+                updated.append("- Status: done")
+                inserted = True
+        if not inserted:
+            if updated and updated[0].startswith("# "):
+                updated.insert(1, "- Status: done")
+            else:
+                updated.insert(0, "- Status: done")
+        kept = updated
+    text = "\n".join(kept)
+    if text and (original.endswith("\n") or done):
+        text += "\n"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def _due_line(path: Path) -> str:
     if not path.is_file() or path.is_symlink():
         return ""
@@ -334,6 +383,7 @@ def list_assignments(root: Path, class_folder: str) -> list[dict[str, str]]:
                 "slug": path.name,
                 "title": _heading(path / "assignment.md", path.name),
                 "due": _due_line(path / "assignment.md"),
+                "done": "yes" if assignment_is_done(path / "assignment.md") else "no",
             }
         )
     return found
@@ -393,7 +443,8 @@ def _catalog_assignments(course: Path) -> str:
             )
         note = "notes.md" if (folder / "notes.md").is_file() else "no notes file"
         source_text = f", sources: {', '.join(sources)}" if sources else ""
-        parts.append(f"{item['slug']} ({note}{source_text})")
+        state = "done" if item["done"] == "yes" else "open"
+        parts.append(f"{item['slug']} ({state}, {note}{source_text})")
     return "; ".join(parts)
 
 
@@ -481,6 +532,21 @@ def class_tools() -> list[dict[str, Any]]:
             ),
         ),
         _tool(
+            "mark_assignment_done",
+            "Mark one assignment done, or mark it not done. Use this when the user says the assignment is finished or not finished. Done assignments leave the to-do list.",
+            _object(
+                {
+                    "class_folder": {"type": "string", "description": "Class folder name, such as biology-101."},
+                    "assignment_folder": {
+                        "type": "string",
+                        "description": "Assignment folder name, such as lab-report.",
+                    },
+                    "done": {"type": "boolean", "description": "True when the assignment is finished."},
+                },
+                ["class_folder", "assignment_folder", "done"],
+            ),
+        ),
+        _tool(
             "delete_folder",
             "Delete a class folder or an assignment folder, including its notes and source files. Use this only when the user explicitly asks to remove that folder.",
             _object(
@@ -552,6 +618,19 @@ class ClassWorkspace:
                 verb = "Updated" if replaced else "Created"
                 label = "1 question" if count == 1 else f"{count} questions"
                 return f"{verb} {stored} with {label}."
+            if name == "mark_assignment_done":
+                done = payload.get("done")
+                if not isinstance(done, bool):
+                    return "Say whether the assignment is done."
+                path = set_assignment_done(
+                    self.root,
+                    str(payload.get("class_folder", "")),
+                    str(payload.get("assignment_folder", "")),
+                    done,
+                )
+                stored = _relative(self.root, path)
+                self._mark(stored)
+                return f"Marked {stored} done." if done else f"Marked {stored} not done."
             if name == "create_assignment":
                 folder = add_assignment(
                     self.root,

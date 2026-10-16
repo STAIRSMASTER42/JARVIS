@@ -136,6 +136,13 @@ class ClassFileTests(unittest.TestCase):
                 {"class_folder": "biology-101", "title": "Essay", "due": ""},
             )
             self.assertIn("biology-101/assignments/essay", created)
+            marked = workspace.dispatch(
+                "mark_assignment_done",
+                {"class_folder": "biology-101", "assignment_folder": "lab-report", "done": True},
+            )
+            self.assertIn("lab-report/assignment.md", marked)
+            self.assertIn("- Status: done", (folder / "assignment.md").read_text(encoding="utf-8"))
+            self.assertIn("done,", catalog(root))
 
     def test_source_path_can_be_read(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

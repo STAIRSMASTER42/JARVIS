@@ -18,7 +18,9 @@ from assistant.classes import (
     _assignment_dir,
     _course_dir,
     add_assignment,
+    assignment_is_done,
     _due_line,
+    set_assignment_done,
     course_title,
     ensure_workspace,
     list_assignments,
@@ -42,8 +44,10 @@ from assistant.writing import add_writing, piece_count, writing_file
 
 LIBRARY_PORT = 8766
 _CLASS_PATH = re.compile(r"^/class/([^/]+)$")
+_CLASS_NOTES = re.compile(r"^/class/([^/]+)/notes$")
 _ASSIGNMENT_PATH = re.compile(r"^/class/([^/]+)/assignments/([^/]+)$")
 _ASSIGNMENT_POST = re.compile(r"^/class/([^/]+)/assignments$")
+_DONE_POST = re.compile(r"^/class/([^/]+)/assignments/([^/]+)/done$")
 _SOURCE_POST = re.compile(r"^/class/([^/]+)/assignments/([^/]+)/sources$")
 _SOURCE_GET = re.compile(r"^/class/([^/]+)/assignments/([^/]+)/sources/([^/]+)$")
 _CLASS_FILE_POST = re.compile(r"^/class/([^/]+)/files$")
@@ -99,7 +103,10 @@ a.card {
   margin: 0 0 8px;
 }
 a.card strong { display: block; }
+a.card.done strong { color: var(--muted); text-decoration: line-through; }
 a.card span, .file span { color: var(--muted); font-size: 13px; }
+.assignment { display: flex; gap: 8px; align-items: stretch; margin: 0 0 8px; }
+.assignment a.card { flex: 1; margin: 0; }
 .note { padding: 14px 16px; margin: 0 0 12px; }
 .note h2, .note h3 { margin: 12px 0 6px; }
 .note h2 { font-size: 18px; }
@@ -124,6 +131,13 @@ button, .button {
   border-radius: 8px;
   padding: 8px 12px;
   text-decoration: none;
+}
+form.mark { margin: 0; padding: 0; background: transparent; align-items: stretch; }
+form.mark button {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  min-width: 72px;
 }
 textarea {
   width: 100%;
@@ -224,8 +238,15 @@ def classes_page(root: Path, error: str = "") -> str:
     else:
         items: list[str] = []
         for course in courses:
-            count = len(list_assignments(root, course.name))
-            label = "1 assignment" if count == 1 else f"{count} assignments"
+            assignments = list_assignments(root, course.name)
+            done_count = sum(1 for item in assignments if item["done"] == "yes")
+            open_count = len(assignments) - done_count
+            if done_count and open_count:
+                label = f"{open_count} open · {done_count} done"
+            elif done_count:
+                label = "1 done" if done_count == 1 else f"{done_count} done"
+            else:
+                label = "1 assignment" if open_count == 1 else f"{open_count} assignments"
             practice_count = len(list_practice_tests(root, course.name))
             if practice_count:
                 label += " · " + ("1 practice test" if practice_count == 1 else f"{practice_count} practice tests")
@@ -260,7 +281,9 @@ def _todo_card(root: Path) -> str:
 
 def todo_page(root: Path, days: int | None) -> str:
     today = date.today()
-    items = filter_todos(collect_todos(root, today), today, days)
+    collected = collect_todos(root, today)
+    items = filter_todos(collected, today, days)
+    finished = [item for item in collected if item.done] if days is None else []
     filters = ['<a href="/todo"' + ("" if days is not None else ' class="active"') + ">All</a>"]
     for window in WINDOWS:
         active = ' class="active"' if days == window else ""
@@ -271,12 +294,14 @@ def todo_page(root: Path, days: int | None) -> str:
     undated = [item for item in items if item.due is None]
     sections: list[str] = []
     if overdue:
-        sections.append("<h2 class='section'>Overdue</h2>" + _todo_cards(overdue, today))
+        sections.append("<h2 class='section'>Overdue</h2>" + _todo_cards(overdue, today, days))
     if upcoming:
         heading = "Due" if days is not None else "Upcoming"
-        sections.append(f"<h2 class='section'>{heading}</h2>" + _todo_cards(upcoming, today))
+        sections.append(f"<h2 class='section'>{heading}</h2>" + _todo_cards(upcoming, today, days))
     if undated and days is None:
-        sections.append("<h2 class='section'>No due date</h2>" + _todo_cards(undated, today))
+        sections.append("<h2 class='section'>No due date</h2>" + _todo_cards(undated, today, days))
+    if finished:
+        sections.append("<h2 class='section'>Done</h2>" + _todo_cards(finished, today, days))
     if not sections:
         if days is None:
             empty = "No assignments yet."
@@ -297,18 +322,42 @@ def todo_page(root: Path, days: int | None) -> str:
     return page("To-do", body)
 
 
-def _todo_cards(items: list[TodoItem], today: date) -> str:
+def _todo_cards(items: list[TodoItem], today: date, days: int | None) -> str:
     cards: list[str] = []
+    next_path = "/todo" if days is None else f"/todo?days={days}"
     for item in items:
-        href = f"/class/{quote(item.class_folder)}/assignments/{quote(item.slug)}"
         when = due_phrase(item, today)
         if item.due_text and item.due_text.lower() != "unknown":
             when = f"{when} · {item.due_text}"
+        label = f"{item.class_title} · {when}"
         cards.append(
-            f'<a class="card" href="{href}"><strong>{html.escape(item.title)}</strong>'
-            f"<span>{html.escape(item.class_title)} · {html.escape(when)}</span></a>"
+            _assignment_row(item.class_folder, item.slug, item.title, label, item.done, next_path)
         )
     return "\n".join(cards)
+
+
+def _assignment_row(
+    class_folder: str,
+    slug: str,
+    title: str,
+    label: str,
+    done: bool,
+    next_path: str,
+) -> str:
+    href = f"/class/{quote(class_folder)}/assignments/{quote(slug)}"
+    action = f"{href}/done"
+    button = "Undo" if done else "Done"
+    value = "no" if done else "yes"
+    done_class = " done" if done else ""
+    return (
+        '<div class="assignment">'
+        f'<a class="card{done_class}" href="{href}"><strong>{html.escape(title)}</strong>'
+        f"<span>{html.escape(label)}</span></a>"
+        f'<form class="mark" method="post" action="{action}">'
+        f'<input type="hidden" name="done" value="{value}">'
+        f'<input type="hidden" name="next" value="{html.escape(next_path)}">'
+        f'<button type="submit">{button}</button></form></div>'
+    )
 
 
 def _writing_card(classes_root: Path) -> str:
@@ -347,22 +396,42 @@ def class_page(root: Path, class_folder: str, error: str = "") -> str:
     course = _course_dir(root, class_folder)
     title = course_title(course)
     assignments = list_assignments(root, class_folder)
-    if assignments:
+    next_path = f"/class/{quote(class_folder)}"
+    open_items = [item for item in assignments if item["done"] != "yes"]
+    done_items = [item for item in assignments if item["done"] == "yes"]
+    if open_items:
         cards = "\n".join(
-            (
-                f'<a class="card" href="/class/{quote(class_folder)}/assignments/{quote(item["slug"])}">'
-                f'<strong>{html.escape(item["title"])}</strong>'
-                f'<span>{html.escape(_due_label(item["due"]))}</span></a>'
+            _assignment_row(
+                class_folder,
+                item["slug"],
+                item["title"],
+                _due_label(item["due"]),
+                False,
+                next_path,
             )
-            for item in assignments
+            for item in open_items
         )
     else:
-        cards = "<p class='muted'>No assignments yet.</p>"
-    notes = _read_text(course / "notes.md")
+        cards = "<p class='muted'>No open assignments.</p>" if done_items else "<p class='muted'>No assignments yet.</p>"
+    if done_items:
+        cards += "<h2 class='section'>Done</h2>" + "\n".join(
+            _assignment_row(
+                class_folder,
+                item["slug"],
+                item["title"],
+                _due_label(item["due"]),
+                True,
+                next_path,
+            )
+            for item in done_items
+        )
     action = f"/class/{quote(class_folder)}/assignments"
+    notes_href = f"/class/{quote(class_folder)}/notes"
     body = (
         f"{_banner(error)}<h1>{html.escape(title)}</h1>"
         f"<p class='sub'><a href='/'>All classes</a></p>"
+        f'<a class="card" href="{notes_href}"><strong>Notes</strong>'
+        f"<span>Class notes and notes from each assignment</span></a>"
         f"<h2 class='section'>Assignments</h2>{cards}"
         f"<form method='post' action='{action}'>"
         f"<input type='text' name='title' required placeholder='Assignment title'>"
@@ -373,9 +442,57 @@ def class_page(root: Path, class_folder: str, error: str = "") -> str:
         f"<form method='post' action='/class/{quote(class_folder)}/files' enctype='multipart/form-data'>"
         f"<input type='file' name='source' required>"
         f"<button type='submit'>Add file</button></form>"
-        f"<h2 class='section'>Class notes</h2><div class='note'>{render_note(notes)}</div>"
     )
     return page(title, body)
+
+
+def _note_body(text: str) -> str:
+    skipped_title = False
+    kept: list[str] = []
+    for line in text.splitlines():
+        if not skipped_title and line.startswith("# "):
+            skipped_title = True
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def notes_page(root: Path, class_folder: str) -> str:
+    course = _course_dir(root, class_folder)
+    title = course_title(course)
+    back = f"/class/{quote(class_folder)}"
+    class_notes = _read_text(course / "notes.md")
+    class_body = _note_body(class_notes)
+    if class_body:
+        class_block = f"<div class='note'>{render_note(class_notes)}</div>"
+    else:
+        class_block = "<p class='muted'>No class notes yet.</p>"
+    assignment_blocks: list[str] = []
+    empty = 0
+    for item in list_assignments(root, class_folder):
+        notes = _read_text(course / "assignments" / item["slug"] / "notes.md")
+        if not _note_body(notes):
+            empty += 1
+            continue
+        href = f"{back}/assignments/{quote(item['slug'])}"
+        assignment_blocks.append(
+            f"<h2 class='section'>{html.escape(item['title'])}</h2>"
+            f"<p class='file'><a href='{href}'>Open assignment</a></p>"
+            f"<div class='note'>{render_note(notes)}</div>"
+        )
+    if not assignment_blocks:
+        assignment_blocks.append("<p class='muted'>No assignment notes yet.</p>")
+    elif empty:
+        label = "1 assignment has" if empty == 1 else f"{empty} assignments have"
+        assignment_blocks.append(f"<p class='muted'>{label} no notes yet.</p>")
+    body = (
+        f"<h1>{html.escape(title)} notes</h1>"
+        f"<p class='sub'><a href='{back}'>Back to class</a></p>"
+        f"<h2 class='section'>Class notes</h2>{class_block}"
+        f"<h2 class='section'>Assignment notes</h2>"
+        + "\n".join(assignment_blocks)
+    )
+    return page(f"{title} notes", body)
 
 
 def _class_file_links(class_folder: str, root: Path) -> str:
@@ -542,13 +659,22 @@ def assignment_page(root: Path, class_folder: str, assignment_folder: str, error
     folder = _assignment_dir(root, class_folder, assignment_folder)
     title = _heading_file(folder / "assignment.md", assignment_folder)
     due = _due_label(_due_from_file(folder / "assignment.md"))
+    done = assignment_is_done(folder / "assignment.md")
     notes = _note_blocks(folder)
     sources = _source_links(class_folder, assignment_folder, folder / "sources")
     back = f"/class/{quote(class_folder)}"
-    upload = f"{back}/assignments/{quote(assignment_folder)}/sources"
+    here = f"{back}/assignments/{quote(assignment_folder)}"
+    upload = f"{here}/sources"
+    status = "Done · " if done else ""
+    button = "Undo" if done else "Done"
+    value = "no" if done else "yes"
     body = (
         f"{_banner(error)}<h1>{html.escape(title)}</h1>"
-        f"<p class='sub'>{html.escape(due)} · <a href='{back}'>Back to class</a></p>"
+        f"<p class='sub'>{html.escape(status + due)} · <a href='{back}'>Back to class</a></p>"
+        f'<form class="mark" method="post" action="{here}/done">'
+        f'<input type="hidden" name="done" value="{value}">'
+        f'<input type="hidden" name="next" value="{html.escape(here)}">'
+        f"<button type='submit'>{button}</button></form>"
         f"<h2 class='section'>Notes</h2>{notes}"
         f"<h2 class='section'>Sources</h2>{sources}"
         f"<form method='post' action='{upload}' enctype='multipart/form-data'>"
@@ -556,6 +682,21 @@ def assignment_page(root: Path, class_folder: str, assignment_folder: str, error
         f"<button type='submit'>Add file</button></form>"
     )
     return page(title, body)
+
+
+def _next_after_done(raw: str, class_folder: str, assignment_folder: str) -> str:
+    candidate = unquote(raw.strip())
+    allowed = {
+        f"/class/{class_folder}",
+        f"/class/{class_folder}/assignments/{assignment_folder}",
+        "/todo",
+    }
+    if candidate in allowed:
+        return candidate
+    days = candidate.removeprefix("/todo?days=")
+    if candidate.startswith("/todo?days=") and days in {str(window) for window in WINDOWS}:
+        return candidate
+    return f"/class/{class_folder}/assignments/{assignment_folder}"
 
 
 def _due_label(due: str) -> str:
@@ -665,6 +806,10 @@ class LibraryHandler(BaseHTTPRequestHandler):
             if practice_match:
                 self._practice_get(root, practice_match)
                 return
+            notes_match = _CLASS_NOTES.match(path)
+            if notes_match:
+                self._send_html(notes_page(root, notes_match.group(1)))
+                return
             class_match = _CLASS_PATH.match(path)
             if class_match:
                 self._send_html(class_page(root, class_match.group(1), error))
@@ -695,6 +840,10 @@ class LibraryHandler(BaseHTTPRequestHandler):
             return
         body = self.rfile.read(length)
         content_type = self.headers.get("Content-Type", "")
+        done_post = _DONE_POST.match(path)
+        if done_post:
+            self._mark_done(root, done_post.group(1), done_post.group(2), body)
+            return
         assignment_post = _ASSIGNMENT_POST.match(path)
         if assignment_post:
             self._create_assignment(root, assignment_post.group(1), body)
@@ -715,6 +864,18 @@ class LibraryHandler(BaseHTTPRequestHandler):
             self._grade_practice(root, practice_match, body)
             return
         self._send_html(page("Not found", "<p>That page is not in the classes folder.</p>"), 404)
+
+    def _mark_done(self, root: Path, class_folder: str, assignment_folder: str, body: bytes) -> None:
+        fields = parse_qs(body.decode("utf-8", errors="replace"))
+        done = fields.get("done", ["yes"])[0].strip().lower() in {"yes", "done", "true", "1"}
+        next_path = _next_after_done(fields.get("next", [""])[0], class_folder, assignment_folder)
+        try:
+            set_assignment_done(root, class_folder, assignment_folder, done)
+        except AssistantError as exc:
+            joiner = "&" if "?" in next_path else "?"
+            self._redirect(next_path + joiner + "error=" + quote(exc.message))
+            return
+        self._redirect(next_path)
 
     def _create_assignment(self, root: Path, class_folder: str, body: bytes) -> None:
         fields = parse_qs(body.decode("utf-8", errors="replace"))

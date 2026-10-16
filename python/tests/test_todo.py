@@ -6,7 +6,7 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
-from assistant.classes import add_assignment, add_course
+from assistant.classes import add_assignment, add_course, set_assignment_done
 from assistant.library import start_library
 from assistant.todo import collect_todos, filter_todos, parse_due
 
@@ -69,6 +69,48 @@ class TodoTests(unittest.TestCase):
             items = collect_todos(root, today)
             self.assertEqual(items[0].due, date(2026, 10, 13))
             self.assertEqual(items[0].due_text, "2026-10-13")
+
+    def test_done_assignments_leave_the_active_list(self) -> None:
+        today = date(2026, 10, 11)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            add_course(root, "English")
+            folder = add_assignment(root, "english", "Workshop 1", due="unknown")
+            (folder / "assignment.md").write_text(
+                "# Workshop 1\n\n**Due:** 2026-10-13\n\n## Description\nPractice arguments.\n",
+                encoding="utf-8",
+            )
+            set_assignment_done(root, "english", "workshop-1", True)
+            text = (folder / "assignment.md").read_text(encoding="utf-8")
+            self.assertIn("**Due:** 2026-10-13", text)
+            self.assertIn("- Status: done", text)
+            self.assertIn("## Description", text)
+
+            items = collect_todos(root, today)
+            self.assertTrue(items[0].done)
+            self.assertEqual(filter_todos(items, today, 7), [])
+            self.assertEqual(filter_todos(items, today, None), [])
+
+            server = start_library(root)
+            self.addCleanup(server.shutdown)
+            self.addCleanup(server.server_close)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            with urllib.request.urlopen(base + "/todo", timeout=2) as response:
+                page = response.read().decode("utf-8")
+            self.assertIn(">Done</h2>", page)
+            self.assertIn("Undo", page)
+            self.assertNotIn(">Overdue</h2>", page)
+
+            undone = urllib.request.Request(
+                base + "/class/english/assignments/workshop-1/done",
+                data=b"done=no&next=/todo",
+                method="POST",
+            )
+            with urllib.request.urlopen(undone, timeout=2) as response:
+                restored = response.read().decode("utf-8")
+            self.assertIn("Workshop 1", restored)
+            self.assertNotIn("- Status: done", (folder / "assignment.md").read_text(encoding="utf-8"))
+            self.assertIn("**Due:** 2026-10-13", (folder / "assignment.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

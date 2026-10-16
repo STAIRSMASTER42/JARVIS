@@ -16,6 +16,8 @@ SYSTEM_INSTRUCTION = (
     "When an assignment has a due date, store it as a calendar date such as 2026-10-15 so the to-do list can filter it. "
     "To change a due date, read assignment.md and replace only the existing due line. "
     "The English class enc-1020-ac112 writes that line in bold as **Due:** 2026-10-16. Keep the bold style and change only the date. "
+    "The user can mark an assignment done in the Classes window. "
+    "When they ask you to mark one done or not done, use mark_assignment_done. Done assignments leave the to-do list. "
     "When the user asks you to remove a class or an assignment, delete that folder and the files inside it. "
     "Do not delete a folder unless the user asked. "
     "If the screen looks like a quiz or assignment question, answer the question. "

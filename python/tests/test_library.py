@@ -45,6 +45,11 @@ class LibraryPageTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn("Lab report", course)
             self.assertIn("Due Friday", course)
+            self.assertIn("/class/biology-101/notes", course)
+
+            status, notes_page = _request(base + "/class/biology-101/notes")
+            self.assertEqual(status, 200)
+            self.assertIn("Diffusion across a membrane.", notes_page)
 
             status, assignment = _request(base + "/class/biology-101/assignments/lab-report")
             self.assertEqual(status, 200)

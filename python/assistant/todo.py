@@ -32,6 +32,7 @@ class TodoItem:
     title: str
     due_text: str
     due: date | None
+    done: bool = False
 
     def days_until(self, today: date) -> int | None:
         if self.due is None:
@@ -73,6 +74,7 @@ def collect_todos(root: Path, today: date) -> list[TodoItem]:
                     title=assignment["title"],
                     due_text=due_text,
                     due=parse_due(due_text, today),
+                    done=assignment["done"] == "yes",
                 )
             )
     items.sort(key=lambda item: (item.due is None, item.due or date.max, item.title.lower()))
@@ -80,11 +82,12 @@ def collect_todos(root: Path, today: date) -> list[TodoItem]:
 
 
 def filter_todos(items: list[TodoItem], today: date, days: int | None) -> list[TodoItem]:
-    """Keep assignments due within the next `days`, including anything overdue."""
+    """Keep unfinished assignments due within the next `days`, including anything overdue."""
+    open_items = [item for item in items if not item.done]
     if days is None:
-        return items
+        return open_items
     kept: list[TodoItem] = []
-    for item in items:
+    for item in open_items:
         remaining = item.days_until(today)
         if remaining is not None and remaining <= days:
             kept.append(item)
