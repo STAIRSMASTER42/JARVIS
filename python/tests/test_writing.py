@@ -8,7 +8,7 @@ from pathlib import Path
 from assistant.classes import ClassWorkspace, catalog
 from assistant.cli import _local_context
 from assistant.errors import AssistantError
-from assistant.writing import add_writing, read_my_writing, writing_file, writing_tools
+from assistant.writing import add_writing, like_me_prompt, read_my_writing, writing_file, writing_tools
 
 
 class WritingFileTests(unittest.TestCase):
@@ -62,6 +62,29 @@ class WritingFileTests(unittest.TestCase):
                 add_writing(classes, "   ", "words")
             with self.assertRaises(AssistantError):
                 add_writing(classes, "Title", "   ")
+
+    def test_my_writing_can_fill_most_of_the_context_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            classes = Path(directory) / "classes"
+            classes.mkdir()
+            saved = add_writing(classes, "A long piece", "a" * 1_200_000)
+            self.assertGreater(saved.stat().st_size, 1_200_000)
+            with self.assertRaises(AssistantError):
+                add_writing(classes, "Too big", "b" * 4_000_001)
+
+    def test_write_like_me_puts_the_file_in_the_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            classes = Path(directory) / "classes"
+            classes.mkdir()
+            with self.assertRaises(AssistantError):
+                like_me_prompt(classes, "Explain the census.")
+            add_writing(classes, "The lake", "The water was flat and bright.")
+            prompt = like_me_prompt(classes, "Explain the census.")
+            self.assertTrue(prompt.startswith("Explain the census."))
+            self.assertIn("only words found in that text", prompt)
+            self.assertIn("may add a couple of words", prompt)
+            self.assertIn("Reply with only the writing, as plain text.", prompt)
+            self.assertIn("The water was flat and bright.", prompt)
 
 
 if __name__ == "__main__":

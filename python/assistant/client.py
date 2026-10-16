@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from assistant.errors import EMPTY_RESPONSE_MESSAGE, AssistantError, map_exception
+from assistant.writing import _MAX_CHARS as _WRITING_MAX_CHARS
 
 
 def image_data_url(data: bytes, mime: str) -> str:
@@ -251,11 +252,12 @@ def complete_with_tools(
             result = execute(call["name"], call["arguments"])
             if not isinstance(result, str):
                 result = str(result)
+            limit = _WRITING_MAX_CHARS if call["name"] == "read_my_writing" else 12_000
             outputs.append(
                 {
                     "type": "function_call_output",
                     "call_id": call["call_id"],
-                    "output": result[:12000],
+                    "output": result[:limit],
                 }
             )
         identifier = response_id(response)

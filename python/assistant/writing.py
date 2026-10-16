@@ -15,7 +15,8 @@ WRITING_GUIDANCE = (
     "Do not imitate their writing unless they ask. Do not copy a piece verbatim unless they ask for that."
 )
 
-_MAX_CHARS = 120_000
+# About 1 million tokens, leaving the rest of the 1.2 million token window for the question and the answer.
+_MAX_CHARS = 4_000_000
 _FILENAME = "my-writing.md"
 
 
@@ -77,6 +78,20 @@ def add_writing(classes_root: Path, title: str, text: str) -> Path:
         raise AssistantError("class_file", "My writing is full. The file cannot grow past its size limit.")
     path.write_text(updated, encoding="utf-8")
     return path
+
+
+def like_me_prompt(classes_root: Path, text: str) -> str:
+    """The user's request plus the whole My writing file and a style instruction."""
+    if piece_count(writing_file(classes_root)) == 0:
+        raise AssistantError("bad_request", "Add writing in My writing before using Write like me.")
+    sample = read_my_writing(classes_root)
+    return (
+        f"{text.strip()}\n\n"
+        "Write even closer to the sample text below. "
+        "Use only words found in that text, except you may add a couple of words when one is needed. "
+        "Reply with only the writing, as plain text. No bold, no markdown, no asterisks, and no headings.\n\n"
+        f"{sample}"
+    )
 
 
 def read_my_writing(classes_root: Path) -> str:

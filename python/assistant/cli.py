@@ -16,7 +16,7 @@ from assistant.classes import (
     with_class_context,
 )
 from assistant.library import serve_library
-from assistant.writing import WRITING_GUIDANCE, read_my_writing, writing_summary, writing_tools
+from assistant.writing import WRITING_GUIDANCE, like_me_prompt, read_my_writing, writing_summary, writing_tools
 from assistant.config import load_config
 from assistant.errors import AssistantError, sanitize
 from assistant.images import prepare_image
@@ -125,11 +125,14 @@ def analyze(
     return _finish(text, response_id, workspace)
 
 
-def followup(previous_id: str, text: str, config_path: Path | None) -> dict[str, Any]:
+def followup(previous_id: str, text: str, config_path: Path | None, like_me: bool = False) -> dict[str, Any]:
     if not text.strip():
         raise AssistantError("bad_request", "Enter a message first.")
     config = load_config(config_path)
     workspace = _class_workspace(config)
+    message = text.strip()
+    if like_me:
+        message = like_me_prompt(resolved_classes_dir(config), message)
     instructions, tools, execute = _local_context(config, workspace)
     output_tokens = config["max_output_tokens"]
     if workspace is not None:
@@ -140,7 +143,7 @@ def followup(previous_id: str, text: str, config_path: Path | None) -> dict[str,
         model=config["model"],
         instructions=instructions,
         previous_response_id=previous_id.strip() if previous_id else "",
-        text=text.strip(),
+        text=message,
         max_output_tokens=output_tokens,
         tools=tools,
     )
@@ -197,6 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     follow_parser = subparsers.add_parser("followup", help="Send a message, continuing the conversation when one exists")
     follow_parser.add_argument("--previous-id", default="")
     follow_parser.add_argument("--text", required=True)
+    follow_parser.add_argument("--like-me", action="store_true")
     follow_parser.add_argument("--config")
 
     test_parser = subparsers.add_parser("test-connection", help="Send a tiny text request to OpenAI")
@@ -260,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.text,
             )
         elif args.command == "followup":
-            payload = followup(args.previous_id, args.text, config_path)
+            payload = followup(args.previous_id, args.text, config_path, args.like_me)
         elif args.command == "test-connection":
             payload = test_connection(config_path, args.model)
         elif args.command == "classes":

@@ -252,6 +252,8 @@ local function onWebMessage(message)
     callJS("flash", "Copied.")
   elseif body.action == "followup" then
     M.followup(tostring(body.text or ""))
+  elseif body.action == "like" then
+    M.followup(tostring(body.text or ""), true)
   elseif body.action == "again" then
     M.captureAgain(tostring(body.text or ""))
   elseif body.action == "library" then
@@ -634,7 +636,7 @@ function M.captureAgain(note)
   end
 end
 
-function M.followup(text)
+function M.followup(text, likeMe)
   text = (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
   if text == "" then
     return
@@ -654,6 +656,9 @@ function M.followup(text)
     "--config",
     CONFIG_PATH,
   }
+  if likeMe then
+    table.insert(args, "--like-me")
+  end
   if state.responseId and state.responseId ~= "" then
     table.insert(args, "--previous-id")
     table.insert(args, state.responseId)

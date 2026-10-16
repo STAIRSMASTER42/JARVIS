@@ -77,11 +77,11 @@ The panel uses a non-activating window so it can appear over Safari, Chrome, Pre
 2. An **AI** item appears in the menu bar.
 3. Press **Control + Option + ]**.
 
-The window opens without taking a screenshot. Press **Add screenshot** when you want Jarvis to look at the display. The popup then shows a spinner, then the answer. Text in the answer can be selected. **Copy** puts the conversation on the clipboard. Drag the title bar to move the panel. **Close** or **Escape** dismisses it.
+The window opens without taking a screenshot. Press **Add screenshot** when you want Jarvis to look at the display. The popup then shows a spinner, then the answer. The answer appears in a text box as plain text, without bold formatting, so you can copy just the words. **Copy** puts that plain text on the clipboard. Drag the title bar to move the panel. **Close** or **Escape** dismisses it.
 
 Pressing the shortcut again while a request is running does not start a second request.
 
-Type in the box and press Return to talk to Jarvis. A screenshot is optional. **Add screenshot** captures the display and keeps this conversation, so a later page or question stays in the same context. Text in the box is sent with that screenshot. Closing the panel ends the session.
+Type in the box and press Return to talk to Jarvis. **Write like me** sends that message with your My writing file and tells Jarvis to use only words found in that file, except for a couple of extra words when one is needed. A screenshot is optional. **Add screenshot** captures the display and keeps this conversation, so a later page or question stays in the same context. Text in the box is sent with that screenshot. Closing the panel ends the session.
 
 ### Quit or disable
 
