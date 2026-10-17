@@ -251,11 +251,9 @@ local function onWebMessage(message)
     hs.pasteboard.setContents(tostring(body.text or ""))
     callJS("flash", "Copied.")
   elseif body.action == "followup" then
-    M.followup(tostring(body.text or ""))
-  elseif body.action == "like" then
-    M.followup(tostring(body.text or ""), true)
+    M.followup(tostring(body.text or ""), body.like == true)
   elseif body.action == "again" then
-    M.captureAgain(tostring(body.text or ""))
+    M.captureAgain(tostring(body.text or ""), body.like == true)
   elseif body.action == "library" then
     M.openLibrary()
   end
@@ -561,7 +559,7 @@ function M.openLibrary()
   poll()
 end
 
-function M.captureAgain(note)
+function M.captureAgain(note, likeMe)
   if state.busy then
     callJS("flash", "A request is already running.")
     return
@@ -607,6 +605,9 @@ function M.captureAgain(note)
     if note ~= "" then
       table.insert(args, "--text")
       table.insert(args, note)
+    end
+    if likeMe then
+      table.insert(args, "--like-me")
     end
     local shown, showErr = pcall(function()
       if previousId then

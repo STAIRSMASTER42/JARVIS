@@ -80,6 +80,7 @@ def analyze(
     keep_image: bool,
     previous_id: str | None = None,
     note: str = "",
+    like_me: bool = False,
 ) -> dict[str, Any]:
     config = load_config(config_path)
     data, mime = prepare_image(
@@ -98,11 +99,17 @@ def analyze(
     data_url = api.image_data_url(data, mime)
     continued = (previous_id or "").strip()
     if continued:
+        prompt = api.continue_image_prompt(note)
+    else:
+        prompt = api.analyze_prompt(config["user_prompt"], note)
+    if like_me:
+        prompt = like_me_prompt(resolved_classes_dir(config), prompt)
+    if continued:
         payload = api.build_continue_image_request(
             model=config["model"],
             instructions=instructions,
             previous_response_id=continued,
-            prompt=api.continue_image_prompt(note),
+            prompt=prompt,
             data_url=data_url,
             detail=config["image_detail"],
             max_output_tokens=output_tokens,
@@ -112,7 +119,7 @@ def analyze(
         payload = api.build_analyze_request(
             model=config["model"],
             instructions=instructions,
-            prompt=api.analyze_prompt(config["user_prompt"], note),
+            prompt=prompt,
             data_url=data_url,
             detail=config["image_detail"],
             max_output_tokens=output_tokens,
@@ -190,6 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Text from the popup to include with another screenshot",
     )
+    analyze_parser.add_argument("--like-me", action="store_true")
     analyze_parser.add_argument("--config", help="Path to config.json")
     analyze_parser.add_argument(
         "--keep-image",
@@ -262,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.keep_image,
                 args.previous_id,
                 args.text,
+                args.like_me,
             )
         elif args.command == "followup":
             payload = followup(args.previous_id, args.text, config_path, args.like_me)
