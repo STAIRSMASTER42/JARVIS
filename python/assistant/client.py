@@ -8,6 +8,16 @@ from assistant.errors import EMPTY_RESPONSE_MESSAGE, AssistantError, map_excepti
 from assistant.writing import _MAX_CHARS as _WRITING_MAX_CHARS
 
 
+def research_reasoning() -> dict[str, str]:
+    """High reasoning effort, matching an academic research request."""
+    return {"effort": "high"}
+
+
+def web_search_tool() -> dict[str, Any]:
+    """Ask OpenAI to search the public web. This Mac does not fetch the page."""
+    return {"type": "web_search", "external_web_access": True, "search_context_size": "medium"}
+
+
 def image_data_url(data: bytes, mime: str) -> str:
     encoded = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{encoded}"
@@ -26,6 +36,7 @@ def build_analyze_request(
     payload: dict[str, Any] = {
         "model": model,
         "instructions": instructions,
+        "reasoning": research_reasoning(),
         "max_output_tokens": max_output_tokens,
         "input": [
             {
@@ -58,6 +69,7 @@ def build_followup_request(
     payload: dict[str, Any] = {
         "model": model,
         "instructions": instructions,
+        "reasoning": research_reasoning(),
         "max_output_tokens": max_output_tokens,
         "input": text,
     }
@@ -108,6 +120,7 @@ def build_continue_image_request(
     payload: dict[str, Any] = {
         "model": model,
         "instructions": instructions,
+        "reasoning": research_reasoning(),
         "previous_response_id": previous_response_id,
         "max_output_tokens": max_output_tokens,
         "input": [
@@ -148,11 +161,50 @@ def _block_text(block: Any) -> str:
     return text if isinstance(text, str) else ""
 
 
+def _citation(note: Any) -> str:
+    kind = note.get("type") if isinstance(note, dict) else getattr(note, "type", None)
+    if kind != "url_citation":
+        return ""
+    url = note.get("url") if isinstance(note, dict) else getattr(note, "url", None)
+    title = note.get("title") if isinstance(note, dict) else getattr(note, "title", None)
+    if not isinstance(url, str) or not url.strip():
+        return ""
+    url = url.strip()
+    if isinstance(title, str) and title.strip() and title.strip() != url:
+        return f"{title.strip()} ({url})"
+    return url
+
+
+def _sources(response: Any) -> list[str]:
+    output = response.get("output") if isinstance(response, dict) else getattr(response, "output", None)
+    found: list[str] = []
+    for item in output or []:
+        content = item.get("content") if isinstance(item, dict) else getattr(item, "content", None)
+        for block in content or []:
+            if isinstance(block, str):
+                continue
+            notes = block.get("annotations") if isinstance(block, dict) else getattr(block, "annotations", None)
+            for note in notes or []:
+                line = _citation(note)
+                if line and line not in found:
+                    found.append(line)
+    return found
+
+
+def _with_sources(text: str, sources: list[str]) -> str:
+    fresh = [line for line in sources if line not in text and line[line.rfind("(") + 1 :].rstrip(")") not in text]
+    if not fresh:
+        return text
+    listed = "\n".join(f"- {line}" for line in fresh)
+    return text.rstrip() + "\n\nSources:\n" + listed
+
+
 def extract_text(response: Any) -> str:
     """Read assistant text from a Responses API result."""
+    sources = _sources(response)
     direct = response.get("output_text") if isinstance(response, dict) else getattr(response, "output_text", None)
     if isinstance(direct, str) and direct.strip():
-        return direct.strip()
+        return _with_sources(direct.strip(), sources)
 
     output = response.get("output") if isinstance(response, dict) else getattr(response, "output", None)
     parts: list[str] = []
@@ -165,7 +217,7 @@ def extract_text(response: Any) -> str:
             text = _block_text(block).strip()
             if text:
                 parts.append(text)
-    return "\n".join(parts).strip()
+    return _with_sources("\n".join(parts).strip(), sources)
 
 
 def response_id(response: Any) -> str:
@@ -268,6 +320,7 @@ def complete_with_tools(
             {
                 "model": payload["model"],
                 "previous_response_id": identifier,
+                "reasoning": payload.get("reasoning") or research_reasoning(),
                 "input": outputs,
                 "tools": payload.get("tools") or [],
                 "max_output_tokens": payload["max_output_tokens"],

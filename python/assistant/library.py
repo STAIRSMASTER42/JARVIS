@@ -40,7 +40,7 @@ from assistant.practice import (
     question_by_id,
 )
 from assistant.todo import WINDOWS, TodoItem, collect_todos, due_phrase, filter_todos
-from assistant.writing import add_writing, piece_count, writing_file
+from assistant.writing import add_writing, clear_writing, piece_count, writing_file
 
 LIBRARY_PORT = 8766
 _CLASS_PATH = re.compile(r"^/class/([^/]+)$")
@@ -139,6 +139,8 @@ form.mark button {
   border: 1px solid var(--line);
   min-width: 72px;
 }
+form.clear { margin: 0 0 18px; padding: 0; background: transparent; }
+form.clear button { background: var(--danger); }
 textarea {
   width: 100%;
   min-height: 180px;
@@ -376,13 +378,20 @@ def writing_page(classes_root: Path, error: str = "") -> str:
         text = path.read_text(encoding="utf-8", errors="replace")
     if piece_count(path) == 0:
         shown = "<p class='muted'>No writing yet. Add a piece below.</p>"
+        clear = ""
     else:
         shown = f"<div class='note'>{render_note(text)}</div>"
+        clear = (
+            "<form class='clear' method='post' action='/writing/clear' "
+            "onsubmit=\"return confirm('Delete all of your writing and start over? This cannot be undone.')\">"
+            "<button type='submit'>Delete all writing</button></form>"
+        )
     body = (
         f"{_banner(error)}<h1>My writing</h1>"
         "<p class='sub'><a href='/'>All classes</a></p>"
         "<p class='sub'>This is not a class. Add your own writing here. "
         "When you ask Jarvis to write like you, it reads this file. Jarvis cannot add to it.</p>"
+        f"{clear}"
         f"{shown}"
         "<form class='stack' method='post' action='/writing'>"
         "<input type='text' name='title' required placeholder='Title'>"
@@ -856,6 +865,9 @@ class LibraryHandler(BaseHTTPRequestHandler):
         if class_file_post:
             self._upload_class_file(root, class_file_post.group(1), content_type, body)
             return
+        if path == "/writing/clear":
+            self._clear_writing(root)
+            return
         if path == "/writing":
             self._add_writing(root, body)
             return
@@ -973,6 +985,14 @@ class LibraryHandler(BaseHTTPRequestHandler):
         text = fields.get("text", [""])[0]
         try:
             add_writing(root, title, text)
+        except AssistantError as exc:
+            self._redirect("/writing?error=" + quote(exc.message))
+            return
+        self._redirect("/writing")
+
+    def _clear_writing(self, root: Path) -> None:
+        try:
+            clear_writing(root)
         except AssistantError as exc:
             self._redirect("/writing?error=" + quote(exc.message))
             return

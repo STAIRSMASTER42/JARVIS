@@ -80,6 +80,17 @@ def add_writing(classes_root: Path, title: str, text: str) -> Path:
     return path
 
 
+def clear_writing(classes_root: Path) -> Path:
+    """Remove every piece so the user can start over. Jarvis does not call this."""
+    folder = writing_dir(classes_root)
+    folder.mkdir(exist_ok=True)
+    path = folder / _FILENAME
+    if path.is_symlink():
+        raise AssistantError("class_file", "My writing cannot be a link.")
+    path.write_text("# My writing\n", encoding="utf-8")
+    return path
+
+
 def like_me_prompt(classes_root: Path, text: str) -> str:
     """The user's request plus the whole My writing file and a style instruction."""
     if piece_count(writing_file(classes_root)) == 0:
@@ -87,9 +98,8 @@ def like_me_prompt(classes_root: Path, text: str) -> str:
     sample = read_my_writing(classes_root)
     return (
         f"{text.strip()}\n\n"
-        "Write even closer to the sample text below. "
-        "Use only words found in that text, except you may add a couple of words when one is needed. "
-        "Use the phrase \"Including but not limited to\" as much as possible. "
+        "Write in the same style and tone as the sample text below. "
+        "Use the phrase \"Including, but not limited to\" only occasionally, not in every sentence. "
         "In each writing assignment, include one comparison to lawn keeping, and choose a different comparison each time. "
         "First say a short comment, such as here is your essay. "
         "Then put only the writing after a line that is exactly ---essay--- and before a line that is exactly ---end---. "

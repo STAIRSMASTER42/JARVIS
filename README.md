@@ -77,11 +77,13 @@ The panel uses a non-activating window so it can appear over Safari, Chrome, Pre
 2. An **AI** item appears in the menu bar.
 3. Press **Control + Option + ]**.
 
-The window opens without taking a screenshot. Press **Add screenshot** when you want Jarvis to look at the display. The popup then shows a spinner, then the answer. When Jarvis writes an essay, the comment stays in the chat and the essay appears below it in a plain text box. **Copy essay** copies only the essay. **Copy** puts the conversation on the clipboard. Drag the title bar to move the panel. **Close** or **Escape** dismisses it.
+The window opens without taking a screenshot. Press **Add screenshot** when you want Jarvis to look at the display. The popup then shows a spinner, then the answer. When Jarvis writes an essay, the comment stays in the chat and the essay appears below it in a plain text box. **Copy** under the essay copies only the essay. **Copy** in the top bar puts the conversation on the clipboard. Drag the title bar to move the panel. Drag an edge or a corner to resize it. The next time it opens, it keeps that size. **Close** or **Escape** dismisses it.
+
+**Copy text**, or **Control + Option + C**, lets you drag a box around words on the screen. Jarvis reads those words on this Mac, copies them, and deletes the picture. If that shortcut already belongs to another OCR tool, turn one of them off.
 
 Pressing the shortcut again while a request is running does not start a second request.
 
-Type in the box and press Return to talk to Jarvis. **Write like me** is a switch. Turn it on, then **Send** or **Add screenshot** includes your My writing file and tells Jarvis to use only words found in that file, except for a couple of extra words when one is needed. Turn it off to send a normal message. A screenshot is optional. **Add screenshot** captures the display and keeps this conversation, so a later page or question stays in the same context. Text in the box is sent with that screenshot. Closing the panel ends the session.
+Type in the box and press Return to talk to Jarvis. **Write like me** is a switch. Turn it on, then **Send** or **Add screenshot** includes your My writing file and tells Jarvis to write in that style and tone. Turn it off to send a normal message. A screenshot is optional. **Add screenshot** captures the display and keeps this conversation, so a later page or question stays in the same context. Text in the box is sent with that screenshot. Closing the panel ends the session.
 
 ### Quit or disable
 
@@ -98,7 +100,7 @@ Edit `~/.config/mac-ai-assistant/config.json`, then choose **Reload Config** fro
 | Field | Purpose |
 |---|---|
 | `shortcut.modifiers` / `shortcut.key` | Global hotkey. Default is `ctrl`, `alt`, and `]`. |
-| `model` | Vision-capable model. Default is `gpt-5.4-mini`. |
+| `model` | Starting model. The header switch moves between GPT-6 Astra, GPT-6.1 Sol, and GPT-6 Luna. Default is `gpt-6-astra`, with high reasoning effort and web search. |
 | `system_instruction` | Instruction sent with every request. |
 | `max_output_tokens` | Cap on the answer length. Default `800`. |
 | `image_max_edge` | Longest side of the JPEG sent to the API, in pixels. Default `1600`. |
@@ -130,7 +132,7 @@ On a quiz or assignment, Jarvis answers the question and uses the matching class
 
 **Classes** in the popup opens a page in your browser. **To-do** lists assignments from every class. Filter it to what is due in 1, 7, 30, or 90 days. **Done** on an assignment marks it finished and takes it off the to-do list. **Undo** puts it back. Due dates need to be calendar dates, such as 2026-10-15. Pick a class, then **Notes**, to read the class notes and the notes from each assignment. **Class files** on a class are for anything that is not tied to one assignment, such as a syllabus. Use **Add file** on an assignment to attach a source for that assignment only. Jarvis can read text, PDF, and Word files, and it can see the names of other files you add.
 
-**My writing** on that page is not a class. Add your own writing there. When you ask Jarvis to write like you, it reads that file and matches your voice. Jarvis cannot add to it.
+**My writing** on that page is not a class. Add your own writing there. **Delete all writing** clears that file so you can start over. When you ask Jarvis to write like you, it reads that file and matches your voice. Jarvis cannot add to it or delete it.
 
 Open a class to see its **Practice tests**. Ask Jarvis for one, and name it, for example Unit 1 or Midterm. A class can have several. Each test uses multiple choice, true/false, and select-all questions. Jarvis writes them from that class's notes and sources.
 
@@ -138,7 +140,7 @@ Those file contents are sent to OpenAI only as part of a request you start, the 
 
 The classes folder must be a dedicated directory. Your home folder, Desktop, Documents, or Downloads cannot be used as `classes_dir`.
 
-The instruction tells the model it is Jarvis, a school assistant on this Mac. It answers quiz and assignment screens, takes notes from textbook screens into the matching class, reads the class files it has access to, and asks when it is not sure which class something belongs to.
+The instruction tells the model it is Jarvis, a school assistant on this Mac, and an academic research assistant. It favors scholarly and primary sources, checks citations, and does not invent references. It answers quiz and assignment screens, takes notes from textbook screens into the matching class, reads the class files it has access to, and asks when it is not sure which class something belongs to.
 
 ## Check the API
 
@@ -161,7 +163,7 @@ scripts/test.sh
 ## Privacy
 
 - Screenshots are written only to the temporary directory, resized there, and deleted after the request is prepared. They are not saved to the Desktop or Photos.
-- The image is sent to OpenAI as part of the Responses API call. It is not sent to any other service.
+- The image is sent to OpenAI as part of the Responses API call. It is not sent to any other service. Jarvis can also ask OpenAI to search the public web with the same API key. That search runs at OpenAI. This Mac does not open those pages.
 - Follow-up questions use OpenAI’s stored response id so the image does not have to be uploaded again. Your OpenAI account’s data-retention settings still apply.
 - The API key is not written to the popup, the Hammerspoon log, or this git repository.
 - Class files stay in the classes folder. The assistant cannot write outside that folder. When it reads a file to answer you, that text is included in the OpenAI request.

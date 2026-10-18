@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from assistant.config import DEFAULTS, SYSTEM_INSTRUCTION, load_config, merge_dict
+from assistant.config import CHAT_MODELS, DEFAULTS, SYSTEM_INSTRUCTION, load_config, merge_dict, selected_model
 from assistant.errors import AssistantError
 
 
@@ -24,6 +24,13 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded["popup"]["width"], 400)
         self.assertTrue(loaded["classes_enabled"])
         self.assertEqual(loaded["classes_dir"], "")
+
+    def test_model_switch_accepts_only_the_three_chat_models(self) -> None:
+        self.assertEqual(CHAT_MODELS, ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna"))
+        self.assertEqual(selected_model("gpt-6-astra", "gpt-6.1-sol"), "gpt-6.1-sol")
+        self.assertEqual(selected_model("gpt-6-luna", ""), "gpt-6-luna")
+        self.assertEqual(selected_model("gpt-6-astra", "gpt-4"), "gpt-6-astra")
+        self.assertEqual(selected_model("not-a-model", None), "gpt-6-astra")
 
     def test_missing_file_uses_defaults(self) -> None:
         missing = Path(tempfile.gettempdir()) / "mac-ai-assistant-missing-config.json"

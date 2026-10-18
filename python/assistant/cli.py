@@ -17,9 +17,10 @@ from assistant.classes import (
 )
 from assistant.library import serve_library
 from assistant.writing import WRITING_GUIDANCE, like_me_prompt, read_my_writing, writing_summary, writing_tools
-from assistant.config import load_config
+from assistant.config import load_config, selected_model
 from assistant.errors import AssistantError, sanitize
 from assistant.images import prepare_image
+from assistant.ocr import read_image
 from assistant.secrets import resolve_api_key
 from assistant import client as api
 
@@ -54,11 +55,12 @@ def _class_workspace(config: dict[str, Any]) -> ClassWorkspace | None:
 
 def _local_context(config: dict[str, Any], workspace: ClassWorkspace | None) -> tuple[str, list[dict[str, Any]] | None, Any]:
     instructions = config["system_instruction"]
+    tools: list[dict[str, Any]] = [api.web_search_tool()]
     if workspace is None:
-        return instructions, None, None
+        return instructions, tools, None
     instructions = with_class_context(instructions, catalog(workspace.root))
     instructions = instructions.rstrip() + "\n\n" + WRITING_GUIDANCE + "\n\n" + writing_summary(workspace.root) + "\n"
-    tools = class_tools() + writing_tools()
+    tools = class_tools() + writing_tools() + tools
 
     def execute(name: str, arguments: str) -> str:
         if name == "read_my_writing":
@@ -81,8 +83,10 @@ def analyze(
     previous_id: str | None = None,
     note: str = "",
     like_me: bool = False,
+    model: str | None = None,
 ) -> dict[str, Any]:
     config = load_config(config_path)
+    chosen = selected_model(config["model"], model)
     data, mime = prepare_image(
         image,
         max_edge=config["image_max_edge"],
@@ -91,11 +95,9 @@ def analyze(
     )
     workspace = _class_workspace(config)
     instructions, tools, execute = _local_context(config, workspace)
-    output_tokens = config["max_output_tokens"]
-    if workspace is not None:
-        output_tokens = max(output_tokens, CLASS_OUTPUT_TOKENS)
+    output_tokens = max(config["max_output_tokens"], CLASS_OUTPUT_TOKENS)
     api_key = resolve_api_key()
-    openai_client = api.make_client(api_key, config["timeout_seconds"])
+    openai_client = api.make_client(api_key, max(config["timeout_seconds"], 120))
     data_url = api.image_data_url(data, mime)
     continued = (previous_id or "").strip()
     if continued:
@@ -106,7 +108,7 @@ def analyze(
         prompt = like_me_prompt(resolved_classes_dir(config), prompt)
     if continued:
         payload = api.build_continue_image_request(
-            model=config["model"],
+            model=chosen,
             instructions=instructions,
             previous_response_id=continued,
             prompt=prompt,
@@ -117,7 +119,7 @@ def analyze(
         )
     else:
         payload = api.build_analyze_request(
-            model=config["model"],
+            model=chosen,
             instructions=instructions,
             prompt=prompt,
             data_url=data_url,
@@ -132,22 +134,27 @@ def analyze(
     return _finish(text, response_id, workspace)
 
 
-def followup(previous_id: str, text: str, config_path: Path | None, like_me: bool = False) -> dict[str, Any]:
+def followup(
+    previous_id: str,
+    text: str,
+    config_path: Path | None,
+    like_me: bool = False,
+    model: str | None = None,
+) -> dict[str, Any]:
     if not text.strip():
         raise AssistantError("bad_request", "Enter a message first.")
     config = load_config(config_path)
+    chosen = selected_model(config["model"], model)
     workspace = _class_workspace(config)
     message = text.strip()
     if like_me:
         message = like_me_prompt(resolved_classes_dir(config), message)
     instructions, tools, execute = _local_context(config, workspace)
-    output_tokens = config["max_output_tokens"]
-    if workspace is not None:
-        output_tokens = max(output_tokens, CLASS_OUTPUT_TOKENS)
+    output_tokens = max(config["max_output_tokens"], CLASS_OUTPUT_TOKENS)
     api_key = resolve_api_key()
-    openai_client = api.make_client(api_key, config["timeout_seconds"])
+    openai_client = api.make_client(api_key, max(config["timeout_seconds"], 120))
     payload = api.build_followup_request(
-        model=config["model"],
+        model=chosen,
         instructions=instructions,
         previous_response_id=previous_id.strip() if previous_id else "",
         text=message,
@@ -159,6 +166,11 @@ def followup(previous_id: str, text: str, config_path: Path | None, like_me: boo
     else:
         answer, response_id = api.complete_with_tools(openai_client, payload, execute)
     return _finish(answer, response_id, workspace)
+
+
+def ocr(image: Path) -> dict[str, Any]:
+    text = read_image(image.expanduser())
+    return {"ok": True, "text": text}
 
 
 def test_connection(config_path: Path | None, model: str | None = None) -> dict[str, Any]:
@@ -198,6 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Text from the popup to include with another screenshot",
     )
     analyze_parser.add_argument("--like-me", action="store_true")
+    analyze_parser.add_argument("--model", default="")
     analyze_parser.add_argument("--config", help="Path to config.json")
     analyze_parser.add_argument(
         "--keep-image",
@@ -209,7 +222,11 @@ def build_parser() -> argparse.ArgumentParser:
     follow_parser.add_argument("--previous-id", default="")
     follow_parser.add_argument("--text", required=True)
     follow_parser.add_argument("--like-me", action="store_true")
+    follow_parser.add_argument("--model", default="")
     follow_parser.add_argument("--config")
+
+    ocr_parser = subparsers.add_parser("ocr", help="Read text from a screenshot and delete it")
+    ocr_parser.add_argument("--image", required=True)
 
     test_parser = subparsers.add_parser("test-connection", help="Send a tiny text request to OpenAI")
     test_parser.add_argument("--config")
@@ -271,9 +288,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.previous_id,
                 args.text,
                 args.like_me,
+                args.model,
             )
         elif args.command == "followup":
-            payload = followup(args.previous_id, args.text, config_path, args.like_me)
+            payload = followup(args.previous_id, args.text, config_path, args.like_me, args.model)
+        elif args.command == "ocr":
+            payload = ocr(Path(args.image))
         elif args.command == "test-connection":
             payload = test_connection(config_path, args.model)
         elif args.command == "classes":

@@ -21,15 +21,19 @@ local state = {
   config = nil,
   root = nil,
   hotkey = nil,
+  ocrHotkey = nil,
   enabled = true,
   menubar = nil,
   webview = nil,
   userContent = nil,
   task = nil,
   captureTimer = nil,
+  ocrTask = nil,
   imagePath = nil,
   pageReady = false,
   pendingJS = {},
+  popupFrame = nil,
+  model = "gpt-6-astra",
 }
 
 local function shellQuote(value)
@@ -209,24 +213,48 @@ local function callJS(fn, value)
   flushJS()
 end
 
-local function popupRect(screen)
+local function popupRect(screen, width, height)
   local popup = (state.config and state.config.popup) or DEFAULTS.popup
   local frame = screen:frame()
-  local width = popup.width
-  local height = math.min(popup.max_height, frame.h - (popup.margin * 2))
-  if height < 220 then
-    height = math.min(220, frame.h)
+  local margin = popup.margin
+  local maxWidth = math.max(160, frame.w - (margin * 2))
+  local maxHeight = math.max(160, frame.h - (margin * 2))
+  width = width or popup.width
+  if not height then
+    height = math.min(popup.max_height, frame.h - (margin * 2))
+    if height < 220 then
+      height = math.min(220, frame.h)
+    end
+  end
+  if width > maxWidth then
+    width = maxWidth
+  end
+  if height > maxHeight then
+    height = maxHeight
   end
   return {
-    x = frame.x + frame.w - width - popup.margin,
-    y = frame.y + popup.margin,
+    x = frame.x + frame.w - width - margin,
+    y = frame.y + margin,
     w = width,
     h = height,
   }
 end
 
+local function rememberFrame(view)
+  if not view then
+    return
+  end
+  local ok, frame = pcall(function()
+    return view:frame()
+  end)
+  if ok and type(frame) == "table" and frame.w and frame.h and frame.w > 0 and frame.h > 0 then
+    state.popupFrame = frame
+  end
+end
+
 local function closePopup()
   local view = state.webview
+  rememberFrame(view)
   state.webview = nil
   state.userContent = nil
   state.pageReady = false
@@ -235,6 +263,26 @@ local function closePopup()
   if view then
     pcall(function() view:delete() end)
   end
+end
+
+local function allowedModel(value)
+  local allowed = {
+    ["gpt-6-astra"] = true,
+    ["gpt-6.1-sol"] = true,
+    ["gpt-6-luna"] = true,
+  }
+  if type(value) == "string" and allowed[value] then
+    return value
+  end
+  if type(state.model) == "string" and allowed[state.model] then
+    return state.model
+  end
+  return "gpt-6-astra"
+end
+
+local function appendModel(args, value)
+  table.insert(args, "--model")
+  table.insert(args, allowedModel(value))
 end
 
 local function onWebMessage(message)
@@ -251,19 +299,27 @@ local function onWebMessage(message)
     hs.pasteboard.setContents(tostring(body.text or ""))
     callJS("flash", "Copied.")
   elseif body.action == "followup" then
-    M.followup(tostring(body.text or ""), body.like == true)
+    M.followup(tostring(body.text or ""), body.like == true, body.model)
   elseif body.action == "again" then
-    M.captureAgain(tostring(body.text or ""), body.like == true)
+    M.captureAgain(tostring(body.text or ""), body.like == true, body.model)
   elseif body.action == "library" then
     M.openLibrary()
+  elseif body.action == "ocr" then
+    M.copyText()
+  elseif body.action == "model" then
+    local nextModel = allowedModel(body.model)
+    if nextModel ~= state.model then
+      state.model = nextModel
+      state.responseId = nil
+    end
   end
 end
 
 local function ensurePopup(screen)
   if state.webview then
-    state.webview:frame(popupRect(screen))
     state.webview:show()
     state.webview:bringToFront(false)
+    callJS("setModel", state.model or "gpt-6-astra")
     return
   end
 
@@ -281,8 +337,10 @@ local function ensurePopup(screen)
     end
   end)
 
-  local view = hs.webview.new(popupRect(screen), { developerExtrasEnabled = false }, userContent)
-  view:windowStyle({ "titled", "closable", "utility", "nonactivating" })
+  local saved = state.popupFrame
+  local rect = popupRect(screen, saved and saved.w, saved and saved.h)
+  local view = hs.webview.new(rect, { developerExtrasEnabled = false }, userContent)
+  view:windowStyle({ "titled", "closable", "resizable", "utility", "nonactivating" })
   view:windowTitle("Jarvis")
   view:titleVisibility("visible")
   view:level(hs.drawing.windowLevels.floating)
@@ -296,8 +354,12 @@ local function ensurePopup(screen)
   if hs.host.interfaceStyle then
     view:darkMode(hs.host.interfaceStyle() == "Dark")
   end
-  view:windowCallback(function(action)
+  view:windowCallback(function(action, _, details)
+    if action == "frameChange" and type(details) == "table" and details.w and details.h then
+      state.popupFrame = details
+    end
     if action == "closing" and state.webview == view then
+      rememberFrame(view)
       state.webview = nil
       state.userContent = nil
       state.pageReady = false
@@ -330,6 +392,7 @@ local function ensurePopup(screen)
   state.pageReady = false
   state.pendingJS = {}
   view:html(html)
+  callJS("setModel", state.model or "gpt-6-astra")
   view:show()
   view:bringToFront(false)
 
@@ -559,7 +622,99 @@ function M.openLibrary()
   poll()
 end
 
-function M.captureAgain(note, likeMe)
+function M.copyText()
+  if state.busy then
+    callJS("flash", "A request is already running.")
+    return
+  end
+  if not state.root then
+    hs.notify.show("Jarvis", "", "The assistant is not installed. Run scripts/install.sh.")
+    return
+  end
+  state.busy = true
+  state.session = state.session + 1
+  local session = state.session
+  local path = temporaryPNG()
+  local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+  local wasVisible = state.webview and state.webview:isVisible()
+  if wasVisible then
+    state.webview:hide()
+  end
+
+  local function finish(message)
+    if session ~= state.session then
+      return
+    end
+    state.busy = false
+    if wasVisible then
+      ensurePopup(screen)
+      callJS("flash", message)
+    elseif message ~= "" then
+      hs.notify.show("Jarvis", "", message)
+    end
+  end
+
+  local task = hs.task.new("/usr/sbin/screencapture", function(exitCode)
+    state.ocrTask = nil
+    if session ~= state.session then
+      deleteFile(path)
+      return false
+    end
+    local attributes = hs.fs.attributes(path)
+    if exitCode ~= 0 or not attributes or not attributes.size or attributes.size < 32 then
+      deleteFile(path)
+      finish("Canceled.")
+      return false
+    end
+    local script = state.root .. "/scripts/run.sh"
+    local reader = hs.task.new("/bin/bash", function(_, stdOut, stdErr)
+      state.ocrTask = nil
+      if session ~= state.session then
+        deleteFile(path)
+        return false
+      end
+      local payload = decodeResult(stdOut)
+      if not payload then
+        deleteFile(path)
+        finish("The text could not be read.")
+        return false
+      end
+      if not payload.ok then
+        finish(redact(payload.error or "The text could not be read."))
+        return false
+      end
+      local text = tostring(payload.text or "")
+      if text == "" then
+        finish("No text found.")
+        return false
+      end
+      hs.pasteboard.setContents(text)
+      finish("Text copied.")
+      return false
+    end, { script, "ocr", "--image", path })
+    if not reader then
+      deleteFile(path)
+      finish("The text could not be read.")
+      return false
+    end
+    reader:setWorkingDirectory(state.root)
+    state.ocrTask = reader
+    if not reader:start() then
+      state.ocrTask = nil
+      deleteFile(path)
+      finish("The text could not be read.")
+    end
+    return false
+  end, { "-i", path })
+  state.ocrTask = task
+  if not task or not task:start() then
+    state.ocrTask = nil
+    deleteFile(path)
+    finish("The screen selection could not open.")
+  end
+end
+
+function M.captureAgain(note, likeMe, model)
   if state.busy then
     callJS("flash", "A request is already running.")
     return
@@ -609,6 +764,7 @@ function M.captureAgain(note, likeMe)
     if likeMe then
       table.insert(args, "--like-me")
     end
+    appendModel(args, model)
     local shown, showErr = pcall(function()
       if previousId then
         ensurePopup(state.screen)
@@ -637,7 +793,7 @@ function M.captureAgain(note, likeMe)
   end
 end
 
-function M.followup(text, likeMe)
+function M.followup(text, likeMe, model)
   text = (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
   if text == "" then
     return
@@ -660,6 +816,7 @@ function M.followup(text, likeMe)
   if likeMe then
     table.insert(args, "--like-me")
   end
+  appendModel(args, model)
   if state.responseId and state.responseId ~= "" then
     table.insert(args, "--previous-id")
     table.insert(args, state.responseId)
@@ -715,11 +872,32 @@ local function bindHotkey()
   if not state.enabled then
     state.hotkey:disable()
   end
+  if state.ocrHotkey then
+    state.ocrHotkey:delete()
+    state.ocrHotkey = nil
+  end
+  local ocrOk, ocrHotkey = pcall(function()
+    return hs.hotkey.bind({ "ctrl", "alt" }, "c", function()
+      M.copyText()
+    end)
+  end)
+  if ocrOk and ocrHotkey then
+    state.ocrHotkey = ocrHotkey
+    if not state.enabled then
+      state.ocrHotkey:disable()
+    end
+  end
 end
 
 local function menuItems()
   local enabledTitle = state.enabled and "Disable shortcut" or "Enable shortcut"
   return {
+    {
+      title = "Copy text  ⌃⌥C",
+      fn = function()
+        M.copyText()
+      end,
+    },
     {
       title = "Open Jarvis  " .. shortcutLabel(),
       fn = function()
@@ -735,6 +913,13 @@ local function menuItems()
             state.hotkey:enable()
           else
             state.hotkey:disable()
+          end
+        end
+        if state.ocrHotkey then
+          if state.enabled then
+            state.ocrHotkey:enable()
+          else
+            state.ocrHotkey:disable()
           end
         end
       end,
@@ -791,6 +976,10 @@ function M.stop()
   if state.hotkey then
     state.hotkey:delete()
     state.hotkey = nil
+  end
+  if state.ocrHotkey then
+    state.ocrHotkey:delete()
+    state.ocrHotkey = nil
   end
   if state.menubar then
     state.menubar:delete()

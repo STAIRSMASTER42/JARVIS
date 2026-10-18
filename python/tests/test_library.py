@@ -140,6 +140,15 @@ class LibraryPageTests(unittest.TestCase):
             self.assertTrue(saved.is_file())
             self.assertFalse((classes / "my-writing.md").exists())
             self.assertNotIn("my-writing.md", _request(base + "/")[1])
+            self.assertIn("Delete all writing", page)
+            self.assertIn("This cannot be undone.", page)
+
+            status, cleared = _request(base + "/writing/clear", b"", "application/x-www-form-urlencoded")
+            self.assertEqual(status, 200)
+            self.assertIn("No writing yet.", cleared)
+            self.assertNotIn("The water was flat and bright.", cleared)
+            self.assertNotIn("Delete all writing", cleared)
+            self.assertEqual(saved.read_text(encoding="utf-8").count("\n## "), 0)
 
 
 if __name__ == "__main__":

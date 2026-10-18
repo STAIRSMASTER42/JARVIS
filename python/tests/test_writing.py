@@ -8,7 +8,7 @@ from pathlib import Path
 from assistant.classes import ClassWorkspace, catalog
 from assistant.cli import _local_context
 from assistant.errors import AssistantError
-from assistant.writing import add_writing, like_me_prompt, read_my_writing, writing_file, writing_tools
+from assistant.writing import add_writing, clear_writing, like_me_prompt, read_my_writing, writing_file, writing_tools
 
 
 class WritingFileTests(unittest.TestCase):
@@ -31,7 +31,8 @@ class WritingFileTests(unittest.TestCase):
 
             context = ClassWorkspace(classes)
             instructions, tools, execute = _local_context({"system_instruction": "Be Jarvis."}, context)
-            names = [tool["name"] for tool in tools or []]
+            self.assertTrue(any(tool.get("type") == "web_search" for tool in tools or []))
+            names = [tool["name"] for tool in tools or [] if "name" in tool]
             self.assertIn("read_my_writing", names)
             self.assertNotIn("write_my_writing", names)
             self.assertIn("You cannot create, edit, or delete that file.", instructions)
@@ -50,6 +51,8 @@ class WritingFileTests(unittest.TestCase):
             linked.symlink_to(outside)
             with self.assertRaises(AssistantError):
                 add_writing(classes, "Nope", "This should not land in the secret file.")
+            with self.assertRaises(AssistantError):
+                clear_writing(classes)
             self.assertEqual(outside.read_text(encoding="utf-8"), "keep")
 
     def test_empty_writing_is_not_a_tool_the_model_can_fill(self) -> None:
@@ -81,9 +84,9 @@ class WritingFileTests(unittest.TestCase):
             add_writing(classes, "The lake", "The water was flat and bright.")
             prompt = like_me_prompt(classes, "Explain the census.")
             self.assertTrue(prompt.startswith("Explain the census."))
-            self.assertIn("only words found in that text", prompt)
-            self.assertIn("may add a couple of words", prompt)
-            self.assertIn("Including but not limited to", prompt)
+            self.assertIn("same style and tone", prompt)
+            self.assertIn("Including, but not limited to", prompt)
+            self.assertIn("only occasionally", prompt)
             self.assertIn("one comparison to lawn keeping", prompt)
             self.assertIn("---essay---", prompt)
             self.assertIn("---end---", prompt)
