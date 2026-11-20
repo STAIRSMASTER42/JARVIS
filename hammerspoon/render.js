@@ -17,6 +17,45 @@
       .replace(/"/g, "&quot;");
   }
 
+  function trimUrl(url) {
+    var clean = url;
+    var trailing = "";
+    while (clean && /[.,;:!?]$/.test(clean)) {
+      trailing = clean.charAt(clean.length - 1) + trailing;
+      clean = clean.slice(0, -1);
+    }
+    while (
+      clean.charAt(clean.length - 1) === ")" &&
+      clean.split("(").length < clean.split(")").length
+    ) {
+      trailing = ")" + trailing;
+      clean = clean.slice(0, -1);
+    }
+    return [clean, trailing];
+  }
+
+  function linkify(text) {
+    var saved = [];
+    var marked = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (_, label, url) {
+      var token = "\u0000L" + saved.length + "\u0000";
+      saved.push('<a href="' + url + '">' + label + "</a>");
+      return token;
+    });
+    var linked = marked.replace(/https?:\/\/[^\s<]+/g, function (url) {
+      var parts = trimUrl(url);
+      if (!parts[0]) return url;
+      return '<a href="' + parts[0] + '">' + parts[0] + "</a>" + parts[1];
+    });
+    return linked.replace(/\u0000L(\d+)\u0000/g, function (_, index) {
+      return saved[Number(index)] || "";
+    });
+  }
+
+  function shownAsDisplay(latex, display) {
+    if (display) return true;
+    return latex.indexOf("\n") !== -1 || /\\displaystyle|\\begin\{/.test(latex);
+  }
+
   function unsafeMath(html) {
     return /<\s*script\b|<\s*iframe\b|<\s*object\b|<\s*embed\b|<\s*link\b|<\s*meta\b|javascript\s*:|data\s*:\s*text\/html|on[a-z]+\s*=/i.test(html);
   }
@@ -26,10 +65,11 @@
     if (!cleaned || !katexLib || typeof katexLib.renderToString !== "function") {
       return escapeHtml(original);
     }
+    var asDisplay = shownAsDisplay(cleaned, display);
     var html;
     try {
       html = katexLib.renderToString(cleaned, {
-        displayMode: !!display,
+        displayMode: asDisplay,
         throwOnError: false,
         trust: false,
         strict: "ignore",
@@ -41,7 +81,7 @@
     if (typeof html !== "string" || unsafeMath(html)) {
       return escapeHtml(original);
     }
-    var kind = display ? "math-scroll display" : "math-scroll inline";
+    var kind = asDisplay ? "math-scroll display" : "math-scroll inline";
     return '<span class="' + kind + '">' + html + "</span>";
   }
 
@@ -157,7 +197,7 @@
       if (line.indexOf("**", i) === i) {
         var closer = line.indexOf("**", i + 2);
         if (!bold && closer === -1) {
-          html += escapeHtml("**");
+          html += linkify(escapeHtml("**"));
           i += 2;
           continue;
         }
@@ -178,7 +218,7 @@
       while (j < line.length && line.indexOf("**", j) !== j && line.charCodeAt(j) !== 0) {
         j += 1;
       }
-      html += escapeHtml(line.slice(i, j));
+      html += linkify(escapeHtml(line.slice(i, j)));
       i = j;
     }
     if (bold) {

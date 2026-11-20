@@ -85,6 +85,24 @@ class MathRenderTests(unittest.TestCase):
         self.assertIn("mtable", matrix)
         self.assertNotIn("<script", matrix.lower())
 
+    def test_multiline_displaystyle_from_a_reply(self) -> None:
+        sample = (
+            "### MOTION\n\n"
+            "• **Average speed:** \\(\\displaystyle\n"
+            "\\text{speed}=\\frac{\\text{distance}}{\\text{time}}\\)\n"
+        )
+        html = render_html(sample)
+        self.assertIn("<h3>MOTION</h3>", html)
+        self.assertIn("<strong>Average speed:</strong>", html)
+        self.assertIn("mfrac", html)
+        self.assertIn("math-scroll display", html)
+        self.assertNotIn("\\frac", html)
+
+    def test_links_stay_links_beside_math(self) -> None:
+        html = render_html("See https://example.com/notes and \\(x^2\\).")
+        self.assertIn('<a href="https://example.com/notes">https://example.com/notes</a>', html)
+        self.assertIn("math-scroll inline", html)
+
     def test_markdown_survives_around_math(self) -> None:
         html = render_html("**Force**\n\n# Motion\n\n- mass \\(m\\)\n- acceleration")
         self.assertIn("<strong>Force</strong>", html)
