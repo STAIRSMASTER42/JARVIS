@@ -17,7 +17,7 @@ from assistant.classes import (
 )
 from assistant.library import serve_library
 from assistant.writing import WRITING_GUIDANCE, like_me_prompt, read_my_writing, writing_summary, writing_tools
-from assistant.config import load_config
+from assistant.config import load_config, with_math_guidance
 from assistant.errors import AssistantError, sanitize
 from assistant.images import prepare_image
 from assistant.secrets import resolve_api_key
@@ -53,7 +53,7 @@ def _class_workspace(config: dict[str, Any]) -> ClassWorkspace | None:
 
 
 def _local_context(config: dict[str, Any], workspace: ClassWorkspace | None) -> tuple[str, list[dict[str, Any]] | None, Any]:
-    instructions = config["system_instruction"]
+    instructions = with_math_guidance(config["system_instruction"])
     if workspace is None:
         return instructions, None, None
     instructions = with_class_context(instructions, catalog(workspace.root))

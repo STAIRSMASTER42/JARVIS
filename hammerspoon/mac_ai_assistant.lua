@@ -259,6 +259,65 @@ local function onWebMessage(message)
   end
 end
 
+local function readBinary(path)
+  local handle = io.open(path, "rb")
+  if not handle then
+    return nil
+  end
+  local contents = handle:read("*a")
+  handle:close()
+  return contents
+end
+
+-- WKWebView's loadHTMLString does not load file: subresources, so KaTeX
+-- and its fonts are inlined. The popup still works with no network.
+local function inlineMathAssets(html, dir)
+  local css = readFile(dir .. "/vendor/katex/katex.min.css")
+  local js = readFile(dir .. "/vendor/katex/katex.min.js")
+  local render = readFile(dir .. "/render.js")
+  if not css or not js or not render then
+    return nil
+  end
+  css = css:gsub(',url%(fonts/[^%)]+%.woff%) format%("woff"%)', "")
+  css = css:gsub(',url%(fonts/[^%)]+%.ttf%) format%("truetype"%)', "")
+  css = css:gsub("url%(fonts/([^%)]+)%)", function(name)
+    if name:find("/", 1, true) or name:find("..", 1, true) then
+      return "url(fonts/" .. name .. ")"
+    end
+    local font = readBinary(dir .. "/vendor/katex/fonts/" .. name)
+    if not font or font == "" then
+      log.w("missing math font " .. name)
+      return "url(fonts/" .. name .. ")"
+    end
+    return 'url("data:font/woff2;base64,' .. hs.base64.encode(font) .. '")'
+  end)
+  -- Function replacements so "%" inside CSS and JavaScript is inserted literally.
+  html = html:gsub('<link rel="stylesheet" href="vendor/katex/katex.min.css">', function()
+    return "<style>" .. css .. "</style>"
+  end, 1)
+  html = html:gsub('<script src="vendor/katex/katex.min.js"></script>', function()
+    return "<script>" .. js .. "</script>"
+  end, 1)
+  html = html:gsub('<script src="render.js"></script>', function()
+    return "<script>" .. render .. "</script>"
+  end, 1)
+  return html
+end
+
+local function popupHTML()
+  local dir = moduleDirectory()
+  local html = readFile(dir .. "/popup.html")
+  if not html then
+    return nil
+  end
+  local ok, bundled = pcall(inlineMathAssets, html, dir)
+  if ok and type(bundled) == "string" and bundled ~= "" then
+    return bundled
+  end
+  log.e("math assets were not inlined: " .. redact(bundled))
+  return html
+end
+
 local function ensurePopup(screen)
   if state.webview then
     state.webview:frame(popupRect(screen))
@@ -267,7 +326,7 @@ local function ensurePopup(screen)
     return
   end
 
-  local html = readFile(moduleDirectory() .. "/popup.html")
+  local html = popupHTML()
   if not html then
     hs.notify.show("Screen Assistant", "", "The popup interface file is missing.")
     return

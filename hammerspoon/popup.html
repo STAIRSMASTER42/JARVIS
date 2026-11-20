@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jarvis</title>
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
 <style>
   :root {
     color-scheme: light dark;
@@ -70,7 +71,9 @@
   button:disabled { opacity: 0.4; }
   #transcript {
     flex: 1;
-    overflow: auto;
+    min-width: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding: 10px;
     user-select: text;
     -webkit-user-select: text;
@@ -79,9 +82,27 @@
     margin: 0 0 8px;
     padding: 8px 10px;
     border-radius: 10px;
+    max-width: 100%;
+    min-width: 0;
     white-space: normal;
     word-wrap: break-word;
   }
+  .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 {
+    font-size: 13px;
+    line-height: 1.3;
+    margin: 0 0 8px;
+  }
+  .bubble h1 { font-size: 15px; }
+  .bubble h2 { font-size: 14px; }
+  .math-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    vertical-align: middle;
+  }
+  .math-scroll.inline { display: inline-block; }
+  .math-scroll.display { display: block; }
+  .bubble .katex, .bubble .katex-display { color: inherit; }
   .assistant { background: var(--card); }
   .user { background: var(--user); margin-left: 28px; }
   .error { background: transparent; color: var(--danger); padding-left: 0; }
@@ -99,6 +120,7 @@
     margin: 0 0 8px;
     padding: 8px;
     overflow: auto;
+    max-width: 100%;
     background: var(--code);
     border-radius: 8px;
   }
@@ -217,6 +239,8 @@
       <button id="like" type="button" aria-pressed="false">Write like me</button>
     </form>
   </div>
+  <script src="vendor/katex/katex.min.js"></script>
+  <script src="render.js"></script>
   <script>
     const transcript = document.getElementById("transcript");
     const status = document.getElementById("status");
@@ -251,6 +275,13 @@
     }
 
     function formatPlain(text) {
+      if (window.jarvisRender && typeof window.jarvisRender.renderAssistantHtml === "function") {
+        return window.jarvisRender.renderAssistantHtml(text, window.katex);
+      }
+      return formatPlainFallback(text);
+    }
+
+    function formatPlainFallback(text) {
       const escaped = escapeHtml(text);
       const chunks = escaped.split("```");
       let html = "";
